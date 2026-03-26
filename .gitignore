@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.astro/
+
+# Wrangler
+.wrangler/
+
+# Environment
+.env
+*.env
+
+# Editor / IDE
+.omc/
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+/package-lock.json
