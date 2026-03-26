@@ -18,9 +18,10 @@ export default defineConfig({
             components: {
                 Footer: './src/components/overrides/Footer.astro',
             },
-            social: {
-                github: 'https://github.com/spark-arena/sparkrun',
-            },
+            social: [
+                {icon: 'github', label: 'GitHub', href: 'https://github.com/spark-arena/sparkrun'},
+                // { icon: 'discord', label: 'Discord', href: 'https://astro.build/chat' },
+            ],
             customCss: [
                 '@fontsource/inter/400.css',
                 '@fontsource/inter/500.css',
