@@ -19,5 +19,3 @@ dist/
 .vscode/
 *.swp
 *.swo
-
-/package-lock.json
