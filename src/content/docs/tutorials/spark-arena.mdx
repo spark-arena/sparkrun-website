@@ -1,0 +1,103 @@
+---
+title: Benchmark on Spark Arena
+description: Submit benchmark results to the Spark Arena leaderboard and compare your DGX Spark performance with the community.
+---
+
+[Spark Arena](https://spark-arena.com) is a community leaderboard for DGX Spark inference performance. sparkrun integrates directly with Spark Arena — authenticate, benchmark, and submit results all from the CLI.
+
+After logging in, the `sparkrun arena benchmark` command handles the rest:
+
+1. **Launches** the inference server
+2. **Benchmarks** using the standardized `spark-arena-v1` profile
+3. **Collects** results (CSV, metadata, effective recipe)
+4. **Uploads** everything to the Spark Arena leaderboard
+5. **Stops** the inference server
+
+## 1. Log in to Spark Arena
+
+Before submitting benchmarks, authenticate with your Spark Arena account:
+
+```bash
+sparkrun arena login
+```
+
+This opens your browser for OAuth authentication. Sign in with your preferred provider (GitHub, Google, etc.) and sparkrun stores a refresh token locally.
+
+:::tip[Headless or remote machines]
+If you're running sparkrun on a headless server or over SSH, the login flow automatically falls back to a **device code flow** — it displays a URL and a code you can enter on any device with a browser.
+:::
+
+Verify your login status anytime:
+
+```bash
+sparkrun arena status
+```
+
+## 2. Run a Spark Arena benchmark
+
+With authentication in place, run a benchmark and submit in one step:
+
+```bash
+sparkrun arena benchmark qwen3-1.7b-sglang
+```
+
+This uses your default cluster. To target a specific cluster or hosts:
+
+```bash
+# Use a saved cluster
+sparkrun arena benchmark qwen3-1.7b-sglang --cluster mylab
+
+# Or specify hosts directly
+sparkrun arena benchmark qwen3-1.7b-sglang --hosts 10.24.11.13,10.24.11.14
+```
+
+For multi-node benchmarks, set tensor parallelism:
+
+```bash
+sparkrun arena benchmark qwen3-1.7b-sglang --tp 2
+```
+
+The standardized `spark-arena-v1` benchmark profile is used automatically — this ensures all submissions are comparable on the leaderboard.
+
+## 3. What gets submitted
+
+When the benchmark completes, sparkrun uploads three files to Spark Arena:
+
+| File | Contents |
+|---|---|
+| `recipe.yaml` | The effective recipe (with all overrides applied) |
+| `benchmark.csv` | Raw benchmark results (prompt sizes, token counts, latencies, throughput) |
+| `metadata.json` | System metadata — sparkrun version, cluster info, runtime details, container image |
+
+All files are cached locally under `~/.cache/sparkrun/benchmarks/<submission-id>/` so you always have a copy.
+
+## 4. Recipe overrides
+
+You can apply the same recipe overrides as `sparkrun run`:
+
+```bash
+# Override GPU memory utilization
+sparkrun arena benchmark qwen3-1.7b-sglang -o gpu_memory_utilization=0.9
+
+# Override max model length
+sparkrun arena benchmark qwen3-1.7b-sglang -o max_model_len=8192
+
+# Override container image
+sparkrun arena benchmark qwen3-1.7b-sglang --image my-custom-image:latest
+```
+
+These overrides are captured in the submission metadata, so the leaderboard accurately reflects your exact configuration.
+
+## 5. Log out (optional)
+
+Your credentials persist across sessions — you only need to log in once. If you want to remove stored credentials (e.g., switching accounts or on a shared machine):
+
+```bash
+sparkrun arena logout
+```
+
+## Next steps
+
+- Browse the [Spark Arena leaderboard](https://spark-arena.com) to see community results
+- Try different recipes and runtimes to find the best configuration for your workload
+- See [Benchmarking Models](/tutorials/benchmarking/) for more on sparkrun's benchmark system (custom profiles, parameters, comparing configurations)

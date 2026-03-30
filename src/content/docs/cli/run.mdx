@@ -18,7 +18,6 @@ Jobs launch in the background (detached containers) and sparkrun follows logs au
 | `--hosts` / `-H` | Comma-separated host list (first = head) |
 | `--hosts-file` | File with hosts (one per line, `#` comments) |
 | `--cluster` | Use a saved cluster by name |
-| `--solo` | Force single-node mode |
 | `--port` | Override serve port |
 | `--tp` / `--tensor-parallel` | Override tensor parallelism |
 | `--pp` / `--pipeline-parallel` | Override pipeline parallelism |
@@ -30,8 +29,11 @@ Jobs launch in the background (detached containers) and sparkrun follows logs au
 | `--transfer-mode` | Resource transfer mode: `auto`, `local`, `push`, or `delegated` (overrides cluster setting) |
 | `--dry-run` / `-n` | Show what would be done without executing |
 | `--foreground` | Run in foreground (don't detach) |
+| `--ensure` | Only launch if not already running; exit 0 if already up |
 | `--no-follow` | Don't follow container logs after launch |
 | `--no-sync-tuning` | Skip syncing tuning configs from registries |
+| `--no-rm` | Don't auto-remove containers on exit (keeps containers after stop) |
+| `--rootful` | Run with `--privileged` as root inside container |
 | `--ray-port` | Ray GCS port — default: 46379 (`vllm-ray` only) |
 | `--init-port` | vLLM/SGLang distributed init port — default: 25000 |
 | `--dashboard` | Enable Ray dashboard on head node (`vllm-ray` only) |
@@ -72,3 +74,21 @@ Each DGX Spark has one GPU, so tensor parallelism maps directly to node count: `
 :::tip[Transfer modes]
 The `--transfer-mode` flag controls how container images and models are distributed to cluster nodes. The default (`auto`) works for most setups. See [Resource Transfer Modes](/getting-started/networking/#resource-transfer-modes) for details on `local`, `push`, and `delegated` modes.
 :::
+
+## Advanced options
+
+These options are hidden from `--help` but available for advanced use cases:
+
+| Option | Description |
+|---|---|
+| `--collect-diagnostics <path>` | Capture the full run lifecycle into an NDJSON file for post-mortem analysis. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics). |
+| `--restart <policy>` | Docker restart policy (`no`, `always`, `unless-stopped`, `on-failure[:N]`) |
+| `--trust` | Trust `post_commands` from third-party registries without confirmation |
+
+```bash
+# Capture full run diagnostics for debugging
+sparkrun run my-recipe --collect-diagnostics run_diag.ndjson
+
+# Set container restart policy
+sparkrun run my-recipe --restart unless-stopped
+```

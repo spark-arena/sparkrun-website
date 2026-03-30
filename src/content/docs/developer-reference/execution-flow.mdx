@@ -7,24 +7,35 @@ This page documents the internal execution flow of `sparkrun run` — from recip
 
 ## Launch lifecycle
 
-Every `sparkrun run` invocation follows this three-phase lifecycle:
+Every `sparkrun run` invocation follows a structured 6-phase pipeline, tracked by the `LaunchProgress` system. Each phase emits progress output at the default verbosity level, with sub-steps visible at `-v`:
 
 ```
-1. Builder: prepare_image()    ← ensures container image is available
-2. Distribution: sync to hosts ← rsync / docker save+load
-3. Launch: start containers    ← run the inference workload
+[1/6] Preparing
+[2/6] Building image — skipped (no builder)
+[3/6] Distributing resources
+[4/6] Syncing tuning configs
+[5/6] Launching vLLM-distributed runtime
+  Step 1/4: Cleanup existing containers
+  Step 2/4: Detect head node IP
+  Step 3/4: Launch head node (rank 0)
+  Step 4/4: Launch worker nodes
+[6/6] Post-launch hooks
 ```
 
-### Phase 1: Builder
+### Phase 1: Preparing
 
-Builders prepare container images before distribution. Most recipes use the default `docker-pull` builder, which is a no-op — the distribution phase handles image pulling.
+Resolves recipe configuration, port availability, container image, and generates a deterministic cluster ID from the recipe + host list + overrides. Also resolves the transfer mode (`auto`/`local`/`push`/`delegated`) and builds SSH kwargs.
+
+### Phase 2: Building image
+
+Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling.
 
 #### Built-in builders
 
 | Builder | Description | When used |
 |---|---|---|
 | `docker-pull` | Default. Does nothing — relies on the distribution phase to pull images. | All recipes without an explicit `builder` field |
-| `eugr` | Legacy builder for eugr-style containers. Clones the eugr repo and runs `build-and-copy.sh`. Converts recipe `mods` into `pre_exec` entries. | Recipes with `builder: eugr`, or v1 recipes with `build_args`/`mods` |
+| `eugr` | Builds [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) containers. Clones the repo, runs `build-and-copy.sh` with recipe-specified build args, and converts recipe `mods` into `pre_exec` entries. | Recipes with `builder: eugr`, v1 recipes with `build_args`/`mods`, or recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly` images (auto-detected) |
 
 #### Builder plugin interface
 
@@ -40,7 +51,7 @@ Builders extend `BuilderPlugin` (from `sparkrun.builders.base`), an SAF Plugin r
 
 Custom builders are discovered via Python entry points in `pyproject.toml`, following the SAF plugin pattern.
 
-### Phase 2: Distribution
+### Phase 3: Distributing resources
 
 sparkrun distributes container images and model files to all target hosts before launching. The transfer mode (set per-cluster or per-command) controls how resources flow.
 
@@ -58,11 +69,24 @@ Models are downloaded locally via HuggingFace Hub's `snapshot_download`, then rs
 
 #### InfiniBand / NCCL auto-configuration
 
-Before launching multi-node workloads, sparkrun detects InfiniBand interfaces on all hosts and computes NCCL environment variables (`NCCL_SOCKET_IFNAME`, `UCX_NET_DEVICES`, etc.) automatically.
+For multi-node workloads, sparkrun detects InfiniBand interfaces on all hosts and computes NCCL environment variables (`NCCL_SOCKET_IFNAME`, `UCX_NET_DEVICES`, etc.) automatically.
 
-### Phase 3: Launch
+### Phase 4: Syncing tuning configs
 
-The runtime plugin handles the actual container launch. Each runtime implements its own multi-node strategy.
+Syncs Triton fused MoE kernel tuning configs from registries to the local cache, then distributes them to all target hosts. Skipped when `--no-sync-tuning` is passed or for delegating runtimes.
+
+### Phase 5: Launching runtime
+
+Generates the serve command, clears the page cache (best-effort, requires sudo), configures the executor (rootless mode, user/group mapping, security options), and calls `runtime.run()`. Each runtime reports sub-steps (cleanup, IP detection, head launch, worker launch, etc.) via the progress tracker.
+
+### Phase 6: Post-launch hooks
+
+After a successful detached launch, handles post-serve lifecycle:
+1. Waits for the serve port to become ready
+2. Runs HTTP health check (if configured)
+3. Executes `post_exec` commands inside the container
+4. Executes `post_commands` (registry-defined hooks — requires `--trust` for third-party registries)
+5. Handles `stop_after_post` (auto-stop after hooks complete, used by benchmarks)
 
 ## Runtime orchestration internals
 
@@ -120,12 +144,13 @@ sparkrun sets these environment variables automatically for TRT-LLM clusters:
 
 NCCL-related variables (`NCCL_SOCKET_IFNAME`, `UCX_NET_DEVICES`, etc.) and `HF_TOKEN` are also propagated to all nodes via `mpirun -x`.
 
-## pre_exec / post_exec hooks
+## Recipe hooks
 
 Recipes can define shell commands that run inside containers at specific lifecycle points:
 
 - **`pre_exec`** — runs after container launch but before the serve command starts. Used by the `eugr` builder to inject mods.
-- **`post_exec`** — runs after the serve command exits (before container cleanup).
+- **`post_exec`** — runs after a successful detached launch (Phase 6), once the serve port is ready. Executes inside the head container.
+- **`post_commands`** — registry-defined hooks that run on the host (not inside the container) after a successful launch. Requires `--trust` for third-party registries.
 
 ```yaml
 pre_exec:

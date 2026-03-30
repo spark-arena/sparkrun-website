@@ -5,8 +5,6 @@ description: Benchmark inference performance with sparkrun's built-in benchmarki
 
 This tutorial walks you through benchmarking inference workloads using sparkrun's integrated benchmarking system, powered by [llama-benchy](https://github.com/eugr/llama-benchy).
 
-## Overview
-
 The `sparkrun benchmark` command automates the full benchmarking flow:
 
 1. **Launch** the inference server
@@ -157,5 +155,6 @@ sparkrun benchmark qwen3-1.7b-sglang --solo --profile spark-arena-v1 --dry-run
 
 ## Next steps
 
+- **Submit to the leaderboard**: Share your results on [Spark Arena](/tutorials/spark-arena/) with one command
 - **Serve multiple models**: Use the [Proxy Gateway](/tutorials/proxy-gateway/) to expose models through a unified API
 - **Explore profiles**: Check the [benchmark CLI reference](/cli/benchmark/) for the full option set

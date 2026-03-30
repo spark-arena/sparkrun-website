@@ -71,6 +71,9 @@ Record types emitted for each host:
 | `host_firmware_updates` | Firmware device inventory and update history |
 | `host_dmi` | DMI/dmidecode data (sudo only) |
 | `host_error` | Error details for hosts that failed collection |
+| `config_sparkrun` | Local sparkrun config: paths, SSH user, default hosts |
+| `config_clusters` | Cluster definitions: names, hosts, users, transfer settings |
+| `config_registries` | Registry configuration: names, URLs, subpaths, enabled state |
 | `diag_summary` | Total hosts, successful/failed counts, duration |
 
 ## Run diagnostics
@@ -99,10 +102,15 @@ The `RunDiagnosticsCollector` wraps the entire `sparkrun run` lifecycle and reco
 | `run_launch_result` | Return code, cluster ID, runtime info, NCCL env |
 | `run_health_check` | Health check attempts with URL, status code, success |
 | `run_container_logs` | Tail of container logs from each host |
+| `log` | All log records (DEBUG+) captured during the run — level, logger name, message, timestamp |
 | `run_error` | Error details with phase context and traceback |
 | `run_summary` | Total duration, per-phase timings, overall success |
 
 Host diagnostics (`host_hardware`, `host_firmware`, etc.) are also collected at the start of the run.
+
+:::note
+The `log` records capture **all** log output at DEBUG level regardless of your console verbosity setting. This means the diagnostics file contains full SSH command output, script content, and internal state even when running with default (quiet) verbosity.
+:::
 
 ### Lifecycle phases
 

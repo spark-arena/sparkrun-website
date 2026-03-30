@@ -16,9 +16,10 @@ Guided interactive wizard that walks through the full cluster setup process in o
 1. **Install check** — detects whether sparkrun is installed as a uv tool; installs it if not
 2. **Cluster creation** — discovers CX7 peers (when running on a DGX Spark), prompts for hosts, creates/updates a named cluster, and sets it as default
 3. **SSH mesh** — establishes passwordless SSH between all cluster hosts and the control machine
-4. **CX7 configuration** — detects ConnectX-7 interfaces, selects conflict-free subnets, assigns static IPs with jumbo frames (MTU 9000), and distributes host keys
-5. **Sudoers entries** — installs scoped sudoers rules for `fix-permissions` and `clear-cache` (no broad sudo)
-6. **earlyoom** — installs and configures OOM protection with inference-aware defaults
+4. **CX7 configuration** — detects ConnectX-7 interfaces, selects conflict-free subnets, assigns static IPs with jumbo frames (MTU 9000), and distributes host keys. If CX7 IPs are added or changed, the SSH mesh is automatically re-run to ensure full connectivity across all interfaces.
+5. **Docker group** — ensures the SSH user is in the `docker` group on all hosts so containers can run without sudo
+6. **Sudoers entries** — installs scoped sudoers rules for `fix-permissions` and `clear-cache` (no broad sudo)
+7. **earlyoom** — installs and configures OOM protection with inference-aware defaults
 
 Each phase is optional — you can skip any step when prompted, and configure it later with the individual subcommand.
 
@@ -89,9 +90,12 @@ Set up passwordless SSH across your cluster hosts. See the [SSH Setup](/getting-
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts (one per line, `#` comments) |
 | `--cluster` | Use a saved cluster |
-| `--user` | SSH user (default: current OS user) |
+| `--user` / `-u` | SSH user (default: current OS user) |
 | `--extra-hosts` | Additional hosts beyond the cluster |
 | `--no-include-self` | Exclude the control machine from the mesh |
+| `--discover-ips` / `--no-discover-ips` | After meshing, discover IB/CX7 IPs and distribute host keys (default: on) |
+| `--diagnose` | Run SSH diagnostics instead of mesh setup (see [SSH Setup — Cross-user SSH](/getting-started/ssh-setup/#cross-user-ssh-control-machine--cluster-user)) |
+| `--dry-run` / `-n` | Show what would be done without executing |
 
 ## CX-7 network configuration
 
@@ -254,7 +258,6 @@ sparkrun setup diagnose --cluster mylab --json
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts (one per line, `#` comments) |
 | `--cluster` | Use a saved cluster definition |
-| `--user` / `-u` | SSH username (default: from cluster config or current user) |
 | `--output` / `-o` | Output NDJSON file path (default: `spark_diag_<timestamp>.ndjson`) |
 | `--json` | Also print a summary to stdout as JSON |
 | `--sudo` | Collect additional sudo-only diagnostics (dmidecode for BIOS, system, baseboard, memory details) |

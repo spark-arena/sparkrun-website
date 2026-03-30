@@ -9,12 +9,16 @@ sparkrun ships with several default registries and supports adding custom ones. 
 
 sparkrun includes the following registries out of the box:
 
-| Registry | Description |
-|---|---|
-| `@official` | Vetted recipes from [Spark Arena](https://spark-arena.com). These have been tested and reviewed for correctness. |
-| `@eugr` | Recipes from the [eugr](https://github.com/eugr) repository. Available by default. |
-| `@sparkrun-transitional` | Recipes that were originally part of sparkrun's built-in defaults, now maintained as a separate registry. |
-| `@experimental` | Experimental recipes from Spark Arena. These may be less tested or use newer features. Hidden from default listings but usable by name. |
+| Registry | Source | Visible | Description |
+|---|---|---|---|
+| `@official` | [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) | Yes | Vetted recipes from Spark Arena. Tested and reviewed for correctness. |
+| `@eugr` | [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) | Yes | Recipes from the eugr/spark-vllm-docker repository. |
+| `@sparkrun-transitional` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | Yes | Recipes originally part of sparkrun's built-in defaults, now maintained separately. |
+| `@experimental` | [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) | No | Experimental Spark Arena recipes. Less tested or using newer features. |
+| `@community` | [spark-arena/community-recipe-registry](https://github.com/spark-arena/community-recipe-registry) | No | Community-contributed recipes. |
+| `@sparkrun-testing` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | No | Internal testing registry with recipes, tuning configs, and benchmark profiles. |
+
+**Visible** registries appear in `sparkrun list` and `sparkrun search`. Hidden registries are still usable by name (e.g., `sparkrun run @experimental/my-recipe`) or with `sparkrun list --all`.
 
 Use `sparkrun registry list` to see all configured registries and their status.
 

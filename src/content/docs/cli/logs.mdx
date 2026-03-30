@@ -4,10 +4,10 @@ description: Re-attach to inference workload logs.
 ---
 
 ```bash
-sparkrun logs <recipe> [options]
+sparkrun logs <target> [options]
 ```
 
-Re-attach to the log output of a running inference workload. Ctrl+C safely detaches — it never kills the inference job.
+Re-attach to the log output of a running inference workload. TARGET can be a recipe name or a cluster ID (from `sparkrun status` output). Ctrl+C safely detaches — it never kills the inference job.
 
 ## Options
 
@@ -17,6 +17,8 @@ Re-attach to the log output of a running inference workload. Ctrl+C safely detac
 | `--hosts-file` | File with hosts |
 | `--cluster` | Use a saved cluster by name |
 | `--tp` / `--tensor-parallel` | Match host trimming from run |
+| `--port` | Override port (to match run-time override) |
+| `--served-model-name` | Override served model name (to match run-time override) |
 | `--tail` | Number of existing log lines to show (default: 100) |
 
 ## Examples

@@ -16,7 +16,7 @@ sparkrun supports multiple inference runtimes through a plugin system. Each runt
 | `trtllm` | TensorRT-LLM | Yes (MPI) | NVIDIA TensorRT-LLM with MPI-based multi-node orchestration |
 
 :::note
-The legacy `eugr-vllm` runtime has been removed from the documentation. For new deployments, use `vllm-distributed` (default) or `vllm-ray`.
+The `eugr-vllm` runtime has been replaced by the `eugr` builder plugin, which integrates [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) container builds directly into the recipe pipeline. Recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly` images automatically use the `eugr` builder with `vllm-distributed` or `vllm-ray` as the runtime.
 :::
 
 ### Automatic runtime detection

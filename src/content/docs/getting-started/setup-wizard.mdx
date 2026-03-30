@@ -125,6 +125,10 @@ This phase only appears when CX7 interfaces are detected on your hosts and you h
 
 For a deep dive into DGX Spark networking, see [Networking](/getting-started/networking/).
 
+### Automatic SSH re-mesh after CX7 changes
+
+When CX7 configuration adds or changes network IPs, the wizard automatically re-runs the SSH mesh to ensure full connectivity across all interfaces (management + CX7). This happens transparently — no extra prompts. If CX7 was skipped or already configured, no re-mesh is needed.
+
 ## Phase 4: Docker group membership
 
 ```
@@ -179,6 +183,7 @@ Setup Complete!
   Cluster:    mylab (2 hosts, set as default)
   SSH mesh:   OK
   CX7:        configured (192.168.11.0/24, 192.168.12.0/24)
+  SSH remesh: OK
   Docker:     OK (2/2)
   Sudoers:    installed (fix-permissions, clear-cache)
   earlyoom:   installed

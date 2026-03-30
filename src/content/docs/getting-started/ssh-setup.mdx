@@ -26,9 +26,14 @@ sparkrun setup ssh --cluster mylab --extra-hosts 10.0.0.99
 
 # Exclude the control machine from the mesh
 sparkrun setup ssh --cluster mylab --no-include-self
+
+# Skip IP discovery phase (InfiniBand, CX7)
+sparkrun setup ssh --cluster mylab --no-discover-ips
 ```
 
 You will be prompted for passwords on first connection to each host. After that, every host in the mesh can SSH to every other host without passwords.
+
+After installing keys, sparkrun **verifies** that pubkey authentication actually works by testing each host independently (without reusing the password-authenticated connection). If verification fails, it prints diagnostics and actionable remediation steps but continues with the inter-node mesh.
 
 ## Manual SSH setup
 
@@ -56,6 +61,25 @@ sparkrun cluster update mylab --user dgxuser
 ```
 
 Or override per-command with `--user`.
+
+## Cross-user SSH (control machine ≠ cluster user)
+
+A common setup is running sparkrun from a control machine where your local user (e.g., `me`) differs from the cluster SSH user (e.g., `dgxuser`). sparkrun handles this automatically — the mesh script installs your local user's public key into the remote user's `authorized_keys`.
+
+If cross-user SSH fails after the mesh completes, the most common cause is **home directory permissions**. OpenSSH's `StrictModes` (enabled by default) rejects keys when the remote user's home directory is group- or world-writable.
+
+sparkrun automatically fixes this during setup (`chmod go-w ~`), but if you encounter issues, use `--diagnose` to pinpoint the problem:
+
+```bash
+sparkrun setup ssh --cluster mylab --diagnose
+```
+
+This runs comprehensive diagnostics on each host:
+- Tests pubkey authentication independently (without password)
+- Checks home directory, `.ssh/`, and `authorized_keys` permissions
+- Inspects `sshd_config` for `AuthorizedKeysFile`, `StrictModes`, `AllowUsers`/`AllowGroups`
+- Verifies your local public key is present in the remote `authorized_keys`
+- Prints pass/fail results with specific remediation steps
 
 ## Advanced SSH configuration
 

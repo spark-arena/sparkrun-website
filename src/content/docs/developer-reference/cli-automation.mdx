@@ -10,11 +10,8 @@ sparkrun is designed to be scriptable. This page covers flags, output formats, a
 Several commands support `--json` for machine-readable output:
 
 ```bash
-# Job status as JSON
-sparkrun status --json
-
-# Cluster health check with JSON output
-sparkrun cluster check-job --json
+# Job health check with JSON output
+sparkrun cluster check-job my-recipe --cluster mylab --json
 
 # Cluster monitor (continuous JSON stream)
 sparkrun cluster monitor --json
@@ -22,17 +19,17 @@ sparkrun cluster monitor --json
 
 ## Health checks
 
-Use `sparkrun cluster check-job` to verify a running workload is healthy:
+Use `sparkrun cluster check-job` to verify a running workload is healthy. The target can be a recipe name or a cluster ID (`sparkrun_<hex>`):
 
 ```bash
-# Basic check — exits 0 if healthy, non-zero otherwise
+# Basic check — exits 0 if running, non-zero otherwise
 sparkrun cluster check-job my-recipe
 
 # JSON output for parsing
-sparkrun cluster check-job my-recipe --json
+sparkrun cluster check-job my-recipe --cluster mylab --json
 
-# Include HTTP health check against the inference endpoint
-sparkrun cluster check-job my-recipe --check-health
+# Also verify the inference server responds at /v1/models
+sparkrun cluster check-job my-recipe --check-http-models
 ```
 
 ## Idempotent launches
@@ -49,7 +46,7 @@ This is useful in scripts and cron jobs where you want to guarantee a workload i
 
 | Flag | Effect |
 |---|---|
-| `--no-follow` | Launch and exit immediately without following logs |
+| `--no-follow` | Launch without following logs |
 | `--no-rm` | Keep containers after the workload stops (useful for log inspection) |
 | `--ensure` | Idempotent launch — skip if already running |
 | `--dry-run` / `-n` | Show what would be done without executing |
@@ -64,17 +61,42 @@ sparkrun run qwen3-1.7b-vllm --no-rm
 
 ## systemd services
 
-Generate systemd unit files for persistent inference services:
+Generate and deploy systemd unit files for persistent inference services.
+
+The recommended workflow is to first launch the workload manually, verify it works, then create a systemd service from the running job. This ensures the service configuration matches a known-good state:
 
 ```bash
-# Export a systemd service file
-sparkrun export systemd my-recipe
+# 1. Launch and verify the workload works
+sparkrun run my-recipe --cluster mylab
 
-# Save to a file
-sparkrun export systemd my-recipe --save /etc/systemd/system/sparkrun-my-recipe.service
+# 2. Get the job ID from the running workload
+sparkrun status
+
+# 3. Preview the generated service file
+sparkrun export systemd <job_id>
+
+# 4. Install the service
+sparkrun export systemd <job_id> --install
 ```
 
-The generated unit file uses `sparkrun run --ensure --no-follow` for the start command and `sparkrun stop` for the stop command.
+You can also generate a service directly from a recipe name (with optional overrides like `--tp`, `--port`, `-o`):
+
+```bash
+# Preview the generated service file
+sparkrun export systemd my-recipe --cluster mylab
+
+# Deploy and start immediately
+sparkrun export systemd my-recipe --cluster mylab --install --start
+
+# Remove the service
+sparkrun export systemd my-recipe --cluster mylab --uninstall
+```
+
+The generated unit file uses `sparkrun run --foreground --no-follow` with `Restart=on-failure`, so systemd automatically restarts the workload if the inference process crashes.
+
+:::caution[Use systemctl to manage systemd services]
+When a workload is managed by systemd, always use `systemctl stop sparkrun-<name>` to stop it — not `sparkrun stop`. If you use `sparkrun stop`, it kills the containers but systemd sees an unexpected failure and restarts the service after 30 seconds.
+:::
 
 ## Exit codes
 
@@ -84,15 +106,56 @@ The generated unit file uses `sparkrun run --ensure --no-follow` for the start c
 | `1` | General error |
 | `2` | Invalid arguments or missing recipe |
 
+## Verbosity and quiet mode
+
+sparkrun supports tiered verbosity via the global `-v` flag (stackable) and a `-q` quiet mode for scripting:
+
+| Flag | Level | Output |
+|---|---|---|
+| *(default)* | PROGRESS | Phase and step output only |
+| `-v` | INFO | Adds detail lines (model resolution, host detection, etc.) |
+| `-vv` | VERBOSE | Adds timestamps and logger names for each message |
+| `-vvv` | DEBUG | Full SSH command output, script content, remote stdout/stderr |
+| `-q` | WARNING | Errors and warnings only — suppresses all progress output |
+
+```bash
+# Scripting: suppress progress output
+sparkrun -q run my-recipe --no-follow
+
+# Debugging: full SSH and script output
+sparkrun -vvv run my-recipe --dry-run
+
+# Moderate detail: timestamps + logger names
+sparkrun -vv setup ssh --cluster mylab
+```
+
+:::tip
+For persistent post-mortem debugging, `--collect-diagnostics` captures **all** log output (DEBUG level) into an NDJSON file regardless of console verbosity. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics).
+:::
+
+## Run diagnostics
+
+When debugging a failed launch or performance issue, capture the full run lifecycle:
+
+```bash
+sparkrun run my-recipe --collect-diagnostics run_diag.ndjson
+```
+
+This records recipe resolution, phase timing, SSH commands, container logs, health checks, and errors into a structured NDJSON file. The diagnostics file captures all log output at DEBUG level even when the console shows default (quiet) output.
+
+See [Diagnostics](/getting-started/diagnostics/) for the full record type reference and processing examples.
+
 ## Environment variables
 
 | Variable | Purpose |
 |---|---|
-| `HF_HOME` | HuggingFace cache root directory |
+| `HF_HOME` | HuggingFace cache root directory (used by `huggingface_hub` for model downloads) |
 | `HF_HUB_CACHE` | HuggingFace model cache directory (overrides `HF_HOME/hub`) |
-| `HF_TOKEN` | HuggingFace authentication token (propagated into containers) |
-| `SPARKRUN_SSH_USER` | Default SSH user for all connections |
-| `SPARKRUN_LOG_LEVEL` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `HUGGINGFACE_HUB_CACHE` | Legacy alias for `HF_HUB_CACHE` |
+
+sparkrun reads these via `huggingface_hub`'s standard resolution. See [HuggingFace cache owned by root](/getting-started/troubleshooting/#huggingface-cache-owned-by-root) for the full resolution order.
+
+For SSH user configuration, use `sparkrun cluster create --user` or `--user` on individual commands. For verbosity, use the `-v` / `-q` flags (see [Verbosity levels](/cli/overview/#verbosity-levels)).
 
 ## Scripting patterns
 
@@ -102,7 +165,7 @@ The generated unit file uses `sparkrun run --ensure --no-follow` for the start c
 #!/bin/bash
 sparkrun run my-recipe --no-follow
 sleep 10
-sparkrun cluster check-job my-recipe --check-health
+sparkrun cluster check-job my-recipe --check-http-models
 ```
 
 ### Ensure a workload is running

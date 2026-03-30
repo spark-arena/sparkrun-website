@@ -129,9 +129,30 @@ sparkrun setup clear-cache --cluster mylab --save-sudo --dry-run
 **Symptoms:**
 
 - `Permission denied (publickey)` when sparkrun tries to connect
+- SSH mesh completes with "Done" but passwordless SSH still doesn't work
 - SSH connection timeouts
 
-**Fixes:**
+**Quick diagnosis:**
+
+Run the built-in SSH diagnostics to identify the exact problem:
+
+```bash
+sparkrun setup ssh --cluster mylab --diagnose
+```
+
+This checks permissions, `sshd_config` settings, and key installation on each host, then prints pass/fail results with specific remediation steps.
+
+**Common causes (especially for cross-user setups):**
+
+1. **Home directory permissions** — the most common cause. OpenSSH's `StrictModes` rejects keys when the remote user's home directory is group- or world-writable:
+   ```bash
+   # Fix on the remote host
+   chmod go-w ~dgxuser
+   ```
+2. **`AuthorizedKeysFile` override** — `sshd_config` may point to a non-default location like `/etc/ssh/authorized_keys/%u` instead of `~/.ssh/authorized_keys`
+3. **`AllowUsers`/`AllowGroups`** — `sshd_config` may restrict which users can SSH in
+
+**Other fixes:**
 
 - Check key permissions: `chmod 600 ~/.ssh/id_*` and `chmod 700 ~/.ssh`
 - Re-establish the SSH mesh across cluster hosts:
@@ -294,3 +315,23 @@ Check that CX7 IPs are reachable between all hosts in the cluster.
 - For very large models, increase the distributed initialization timeout via runtime-specific environment variables
 
 For systematic debugging, use [diagnostics](/getting-started/diagnostics/) to collect detailed host information.
+
+## Capturing run diagnostics
+
+If a launch fails or behaves unexpectedly and you need detailed post-mortem data, capture the full lifecycle:
+
+```bash
+sparkrun run my-recipe --collect-diagnostics run_diag.ndjson
+```
+
+This records everything — recipe resolution, SSH commands, phase timing, container logs, health check attempts, and all log output at DEBUG level — into a single NDJSON file, even when console output is at the default verbosity. Attach this file when filing support issues.
+
+For more details, see [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics).
+
+:::tip[Verbose output for live debugging]
+For real-time debugging without capturing to a file, use `-vvv` for full SSH and script output:
+```bash
+sparkrun -vvv run my-recipe
+```
+See [CLI Overview — Verbosity levels](/cli/overview/#verbosity-levels) for all options.
+:::

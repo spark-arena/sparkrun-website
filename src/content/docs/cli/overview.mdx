@@ -9,9 +9,20 @@ sparkrun provides a unified CLI for managing LLM inference workloads on DGX Spar
 
 | Option | Description |
 |---|---|
-| `-v` / `--verbose` | Enable verbose/debug output |
+| `-v` / `--verbose` | Increase verbosity (stackable: `-v`, `-vv`, `-vvv`) |
+| `-q` / `--quiet` | Suppress all output except errors (for scripting) |
 | `--version` | Show version and exit |
 | `--help` | Show help for any command |
+
+### Verbosity levels
+
+| Flag | Level | Output |
+|---|---|---|
+| *(default)* | PROGRESS | Phase and step output only |
+| `-v` | INFO | Adds detail lines |
+| `-vv` | VERBOSE | Adds timestamps and logger names |
+| `-vvv` | DEBUG | Full SSH command output, script diagnostics |
+| `-q` | WARNING | Errors and warnings only (for scripting) |
 
 ## Command groups
 
@@ -20,8 +31,9 @@ sparkrun provides a unified CLI for managing LLM inference workloads on DGX Spar
 | Command | Description |
 |---|---|
 | `sparkrun run <recipe>` | Launch an inference workload |
-| `sparkrun stop <recipe>` | Stop a running workload |
-| `sparkrun logs <recipe>` | Re-attach to workload logs |
+| `sparkrun stop [target]` | Stop a running workload (recipe name or cluster ID) |
+| `sparkrun logs <target>` | Re-attach to workload logs (recipe name or cluster ID) |
+| `sparkrun status` | Show running sparkrun containers (alias for `cluster status`) |
 | `sparkrun benchmark <recipe>` | Benchmark an inference recipe (auto: run → benchmark → stop) |
 | `sparkrun update` | Update sparkrun + registries (`--no-update-registries` to skip) |
 
@@ -70,6 +82,7 @@ Recipes can be local names, file paths, URLs, or [Spark Arena](https://spark-are
 | `sparkrun cluster unset-default` | Remove the default cluster setting |
 | `sparkrun cluster default` | Show the current default cluster |
 | `sparkrun cluster status` | Show sparkrun containers running on cluster hosts |
+| `sparkrun cluster check-job <target>` | Check if a job is running (exit 0 = running, 1 = not) |
 | `sparkrun cluster monitor` | Live-monitor CPU, RAM, and GPU metrics across hosts |
 
 ### Export commands
@@ -107,6 +120,17 @@ See [tune](/cli/tune/) for details.
 
 See [proxy](/cli/proxy/) for details.
 
+### Arena commands
+
+| Command | Description |
+|---|---|
+| `sparkrun arena login` | Authenticate with Spark Arena via OAuth |
+| `sparkrun arena logout` | Remove stored Spark Arena credentials |
+| `sparkrun arena status` | Show Spark Arena login status |
+| `sparkrun arena benchmark <recipe>` | Benchmark a recipe and submit results to Spark Arena |
+
+See [Spark Arena](https://spark-arena.com) for the leaderboard and community benchmarks.
+
 ### Setup commands
 
 | Command | Description |
@@ -118,5 +142,6 @@ See [proxy](/cli/proxy/) for details.
 | `sparkrun setup cx7` | Detect and configure ConnectX-7 NICs across hosts |
 | `sparkrun setup fix-permissions` | Fix root-owned HF cache files on cluster hosts |
 | `sparkrun setup clear-cache` | Drop Linux page cache on cluster hosts to free memory |
-| `sparkrun setup wizard` | Guided setup wizard (cluster, SSH, CX7, sudoers, earlyoom) |
+| `sparkrun setup earlyoom` | Install and configure earlyoom OOM protection on cluster hosts |
+| `sparkrun setup wizard` | Guided setup wizard (cluster, SSH, CX7, Docker group, sudoers, earlyoom) |
 | `sparkrun setup diagnose` | Collect hardware/firmware/network/Docker diagnostics |
