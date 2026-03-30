@@ -32,6 +32,22 @@ export default defineConfig({
                 './src/styles/custom.css',
                 './src/styles/landing.css',
             ],
+            head: [
+                {
+                    tag: 'script',
+                    attrs: {
+                        async: true,
+                        src: 'https://www.googletagmanager.com/gtag/js?id=G-LPQWBYH74V',
+                    },
+                },
+                {
+                    tag: 'script',
+                    content: `window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-LPQWBYH74V');`,
+                },
+            ],
             sidebar: [
                 {
                     label: 'Getting Started',
