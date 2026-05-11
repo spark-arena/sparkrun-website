@@ -92,6 +92,7 @@ gtag('config', 'G-LPQWBYH74V');`,
                         {label: 'SGLang', slug: 'runtimes/sglang'},
                         {label: 'llama.cpp', slug: 'runtimes/llama-cpp'},
                         {label: 'TensorRT-LLM', slug: 'runtimes/trtllm'},
+                        {label: 'Atlas', slug: 'runtimes/atlas'},
                     ],
                 },
                 {

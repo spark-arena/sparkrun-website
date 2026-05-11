@@ -1,0 +1,170 @@
+---
+title: Atlas
+description: Using Atlas (pure-Rust LLM inference server) on DGX Spark.
+---
+
+[Atlas](https://atlasinference.io/) is a pure-Rust LLM inference server with a native NCCL-based distribution layer. sparkrun's `atlas` runtime launches `spark serve` and orchestrates the container lifecycle, NCCL bootstrap, and OpenAI-compatible HTTP endpoint.
+
+## Features
+
+- Pure-Rust inference server with low overhead
+- Native NCCL bootstrap via `--rank`, `--world-size`, `--master-addr`, and `--master-port`
+- Tensor parallelism (`--tp-size`) and expert parallelism (`--ep-size`) — both can share the same physical ranks (overlapping groups) or form an orthogonal mesh
+- Optional speculative decoding (`--speculative`, `--ngram-speculative`, `--self-speculative`), DFlash attention, and prefix caching
+- `--high-speed-swap` path that uses `io_uring` for fast KV/cache spill (containers run with `seccomp=unconfined` and `IPC_LOCK`/`SYS_NICE` capabilities)
+
+:::caution
+Atlas is currently restricted to single-node deployments (`tensor_parallel: 1`, `ep_size: 1`) in sparkrun. Multi-node tensor and expert parallelism support is coming in a near-term release.
+:::
+
+## Official recipe registry
+
+The Atlas maintainers publish an official sparkrun recipe registry at [Avarok-Cybersecurity/atlas-recipes](https://github.com/Avarok-Cybersecurity/atlas-recipes). Treat this as the **authoritative source for official Atlas recipes** — recipe formats, supported flags, and container tags there are kept in sync with upstream Atlas releases.
+
+The `@atlas` registry is bundled as a default registry in sparkrun **v0.2.31 and later**, so it's discoverable out of the box without manual `sparkrun registry add`:
+
+```bash
+# List recipes from the official Atlas registry
+sparkrun recipe list @atlas
+
+# Run a recipe from the @atlas registry
+sparkrun run @atlas/<recipe-name>
+```
+
+If you're on an older sparkrun release, you'll need to update to use the atlas runtime and registry.
+
+## Running
+
+```bash
+sparkrun run @atlas/qwen3.5-35b-a3b-nvfp4
+```
+
+## Container images
+
+Default image prefix: `avarok/atlas-gb10`
+
+```yaml
+container: avarok/atlas-gb10:latest
+```
+
+See the [Atlas GitHub repository](https://github.com/Avarok-Cybersecurity/atlas) for image tags and release notes.
+
+## Example recipe
+
+This is the official `qwen3.5-35b-a3b-nvfp4` recipe from the `@atlas` registry — Atlas's fastest catalogued model on a single GB10:
+
+```yaml
+recipe_version: "2"
+model: Sehyo/Qwen3.5-35B-A3B-NVFP4
+runtime: atlas
+container: avarok/atlas-gb10:latest
+max_nodes: 1
+
+metadata:
+  description: |
+    Qwen3.5-35B (A3B MoE) NVFP4 + MTP — Atlas's fastest catalogued model
+    on a single GB10 (~133 tok/s decode at concurrency=1, ISL=128, OSL=128
+    per the avarok/atlas-gb10 QUICKSTART).
+  maintainer: avarok
+  category: agent
+  model_params: 35B
+  model_dtype: nvfp4
+  quantization: nvfp4
+  kv_dtype: nvfp4
+
+defaults:
+  port: 8888
+  host: 0.0.0.0
+  max_model_len: 8192
+  kv_cache_dtype: nvfp4
+  gpu_memory_utilization: 0.88
+  scheduling_policy: slai
+  speculative: true
+  mtp_quantization: nvfp4
+  enable_prefix_caching: true
+```
+
+When no `command` template is provided, sparkrun generates `spark serve {model}` with flags derived from `defaults` via the Atlas flag map.
+
+## Configuration options
+
+These recipe `defaults` keys map to `spark serve` CLI flags:
+
+### Standard sparkrun keys
+
+| Key | Flag | Description |
+|---|---|---|
+| `port` | `--port` | Serving port |
+| `host` | `--host` | Bind address |
+| `tensor_parallel` | `--tp-size` | Tensor parallelism degree (distribution inference coming soon) |
+| `gpu_memory_utilization` | `--gpu-memory-utilization` | Fraction of GPU memory for the engine |
+| `max_model_len` | `--max-seq-len` | Maximum sequence length |
+| `max_num_seqs` | `--max-num-seqs` | Maximum concurrent sequences |
+| `max_num_batched_tokens` | `--max-prefill-tokens` | Maximum prefill token budget per step |
+| `served_model_name` | `--model-name` | Public model name exposed by the OpenAI API |
+| `kv_cache_dtype` | `--kv-cache-dtype` | KV cache datatype |
+
+### Atlas-specific keys
+
+| Key | Flag | Description |
+|---|---|---|
+| `ep_size` | `--ep-size` | Expert parallelism degree (MoE models) |
+| `max_batch_size` | `--max-batch-size` | Maximum batch size |
+| `block_size` | `--block-size` | KV cache block size |
+| `kv_high_precision_layers` | `--kv-high-precision-layers` | Layers kept in higher KV precision |
+| `tool_call_parser` | `--tool-call-parser` | Tool-call parser name |
+| `tool_max_tokens` | `--tool-max-tokens` | Maximum tokens per tool call |
+| `scheduling_policy` | `--scheduling-policy` | Request scheduling policy |
+| `tbt_deadline_ms` | `--tbt-deadline-ms` | Token-by-token latency deadline (ms) |
+| `max_prefill_tokens` | `--max-prefill-tokens` | Maximum prefill tokens per step |
+| `oom_guard_mb` | `--oom-guard-mb` | Headroom reserved to avoid OOM (MB) |
+| `ssm_cache_slots` | `--ssm-cache-slots` | SSM cache slot count |
+| `ssm_checkpoint_interval` | `--ssm-checkpoint-interval` | SSM checkpoint cadence |
+| `mtp_quantization` | `--mtp-quantization` | Multi-token-prediction quantization |
+| `mtp_vocab` | `--mtp-vocab` | Multi-token-prediction vocabulary |
+| `num_drafts` | `--num-drafts` | Number of speculative draft tokens |
+| `draft_model` | `--draft-model` | Draft model for speculative decoding |
+| `dflash_gamma` | `--dflash-gamma` | DFlash gamma parameter |
+| `dflash_window_size` | `--dflash-window-size` | DFlash attention window size |
+| `max_thinking_budget` | `--max-thinking-budget` | Maximum reasoning tokens |
+| `model_from_path` | `--model-from-path` | Load model from a local path |
+| `cache_dir` | `--cache-dir` | Override cache directory |
+| `gpu_ordinal` | `--gpu-ordinal` | GPU ordinal override |
+
+### Boolean toggles
+
+Present-when-truthy flags (no value emitted):
+
+| Key | Flag |
+|---|---|
+| `enable_prefix_caching` | `--enable-prefix-caching` |
+| `speculative` | `--speculative` |
+| `self_speculative` | `--self-speculative` |
+| `ngram_speculative` | `--ngram-speculative` |
+| `dflash` | `--dflash` |
+| `disable_thinking` | `--disable-thinking` |
+| `high_speed_swap` | `--high-speed-swap` |
+| `require_auth` | `--require-auth` |
+
+## Parallelism model
+
+Atlas derives `world_size` from `tensor_parallel` and `ep_size`:
+
+- `world_size == tp_size * ep_size` — orthogonal mesh (TP and EP on independent ranks)
+- `world_size == tp_size == ep_size` — overlapping groups (both groups share the same physical ranks)
+
+sparkrun maps the resulting world size to physical hosts automatically. While the multi-node path is gated, set `tensor_parallel: 1` and omit `ep_size` (or set it to `1`).
+
+## Docker options
+
+Atlas containers run with extra Docker options required by its NCCL and `io_uring` paths:
+
+- `--cap-add=IPC_LOCK` — required for `ibv_reg_mr` (RDMA memory registration)
+- `--cap-add=SYS_NICE` — required by the SQPOLL kernel thread used with `--high-speed-swap`
+- `--security-opt seccomp=unconfined` — Docker's default seccomp profile blocks the `io_uring_*` syscalls used by `--high-speed-swap`
+
+## References
+
+- [Atlas on GitHub](https://github.com/Avarok-Cybersecurity/atlas)
+- [Official Atlas recipe registry (@atlas)](https://github.com/Avarok-Cybersecurity/atlas-recipes)
+- [Atlas website](https://atlasinference.io/)

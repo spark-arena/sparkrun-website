@@ -21,6 +21,7 @@ export default function Footer() {
             <li><a href="/runtimes/vllm/">vLLM</a></li>
             <li><a href="/runtimes/sglang/">SGLang</a></li>
             <li><a href="/runtimes/llama-cpp/">llama.cpp</a></li>
+            <li><a href="/runtimes/atlas/">atlas</a></li>
 
           </ul>
         </div>

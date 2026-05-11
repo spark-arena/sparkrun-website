@@ -27,7 +27,7 @@ const features = [
   {
     icon: '🔄',
     title: 'Multiple Runtimes',
-    description: 'First-class support for vLLM, SGLang, and llama.cpp. Same CLI, same recipe format, different engines under the hood.',
+    description: 'First-class support for vLLM, SGLang, llama.cpp, atlas, and more. Same CLI, same recipe format, different engines under the hood.',
   },
   {
     icon: '🤖',

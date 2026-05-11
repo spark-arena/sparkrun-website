@@ -14,6 +14,7 @@ sparkrun supports multiple inference runtimes through a plugin system. Each runt
 | `sglang` | SGLang | Yes (native) | High-throughput inference, structured generation, experimental GGUF |
 | `llama-cpp` | llama.cpp | Experimental | GGUF quantized models, lightweight deployment |
 | `trtllm` | TensorRT-LLM | Yes (MPI) | NVIDIA TensorRT-LLM with MPI-based multi-node orchestration |
+| `atlas` | [Atlas](https://atlasinference.io/) | Coming soon | Pure-Rust inference server with native NCCL distribution (currently `tp=1` only) |
 
 :::note
 The `eugr-vllm` runtime has been replaced by the `eugr` builder plugin, which integrates [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) container builds directly into the recipe pipeline. Recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly` images automatically use the `eugr` builder with `vllm-distributed` or `vllm-ray` as the runtime.
@@ -63,6 +64,7 @@ Both `vllm-distributed` and `vllm-ray` use the same container images and support
 - **SGLang** offers competitive performance, good structured generation support, and experimental GGUF quantized model serving.
 - **llama.cpp** is ideal for GGUF quantized models or when you want a lightweight alternative.
 - **TensorRT-LLM** provides NVIDIA's optimized inference engine with MPI-based multi-node orchestration.
+- **Atlas** is a pure-Rust inference server (see [Atlas on GitHub](https://github.com/Avarok-Cybersecurity/atlas)) with native NCCL distribution. Currently restricted to single-node (`tensor_parallel: 1`); multi-node tensor and expert parallelism support is in development.
 
 ## Maintained container images
 
