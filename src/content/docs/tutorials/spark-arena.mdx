@@ -88,7 +88,23 @@ sparkrun arena benchmark qwen3-1.7b-sglang --image my-custom-image:latest
 
 These overrides are captured in the submission metadata, so the leaderboard accurately reflects your exact configuration.
 
-## 5. Log out (optional)
+## 5. Resumable submissions
+
+Long `spark-arena-v1` sweeps are checkpointed after every benchmark task, so if a submission is interrupted partway through — Ctrl+C, OOM, network blip, anything — just re-run the exact same command and sparkrun picks up where it left off, skipping the tasks that already completed.
+
+```bash
+# First attempt — interrupted partway through
+sparkrun arena benchmark qwen3-1.7b-sglang --cluster mylab --tp 2
+
+# Re-run — sparkrun resumes the sweep and submits when complete
+sparkrun arena benchmark qwen3-1.7b-sglang --cluster mylab --tp 2
+```
+
+sparkrun also **pins the benchmarking framework version** (e.g. the `llama-benchy` release) on the first task of a run and reuses that exact version for every subsequent task — even after a resume — so the numbers you submit are internally consistent. The pinned version is captured in the uploaded `metadata.json`.
+
+State files live under `~/.cache/sparkrun/benchmarks/`. See [Resumable runs](/tutorials/benchmarking/#8-resumable-runs) in the benchmarking tutorial for more detail.
+
+## 6. Log out (optional)
 
 Your credentials persist across sessions — you only need to log in once. If you want to remove stored credentials (e.g., switching accounts or on a shared machine):
 

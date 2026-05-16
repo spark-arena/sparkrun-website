@@ -145,7 +145,27 @@ sparkrun benchmark qwen3-1.7b-sglang --solo \
 ```
 :::
 
-## 8. Preview before running
+## 8. Resumable runs
+
+Long benchmark sweeps (a profile with many `pp` × `tg` × `depth` × `concurrency` combinations) can take hours. sparkrun checkpoints progress after every task, so an interrupted sweep — Ctrl+C, OOM, transient SSH hiccup, anything — picks up exactly where it left off on the next invocation.
+
+Just re-run the same command:
+
+```bash
+# First attempt — interrupted partway through
+sparkrun benchmark qwen3-1.7b-sglang --profile spark-arena-v1 --solo
+
+# Re-run the same command — sparkrun skips completed tasks and resumes
+sparkrun benchmark qwen3-1.7b-sglang --profile spark-arena-v1 --solo
+```
+
+By default, `--exit-on-first-fail` halts the sweep on the first failing task so the issue can be fixed before more compute is spent. Pass `--no-exit-on-first-fail` to keep going through the remaining tasks instead.
+
+To keep results comparable across long, possibly-resumed sweeps, sparkrun **pins the benchmarking framework version** (e.g. the `llama-benchy` release) on the first task and reuses that exact version for every subsequent task in the same run — even if a newer release ships mid-sweep. The pinned version is recorded in the output metadata.
+
+State files live under `~/.cache/sparkrun/benchmarks/`. See the [benchmark CLI reference](/cli/benchmark/#scheduling-and-resumability) for the full details.
+
+## 9. Preview before running
 
 Use `--dry-run` to see what sparkrun would do without executing anything:
 

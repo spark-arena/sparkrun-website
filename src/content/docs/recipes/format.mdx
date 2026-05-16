@@ -140,19 +140,7 @@ Substitution is iterative: if a placeholder resolves to a string containing anot
 
 ## Topology fields
 
-:::tip[Prefer min_nodes / max_nodes]
-Use `min_nodes` and `max_nodes` to set appropriate limits for your recipe. The `solo_only`, `cluster_only`, and `mode` fields exist for convenience and backward compatibility, but explicit node limits are clearer and more flexible.
-:::
-
-### `mode`
-
-Explicit topology mode. Usually not needed — sparkrun infers from `min_nodes` and `max_nodes`.
-
-| Value | Meaning |
-|---|---|
-| `auto` | (default) sparkrun decides based on node counts and CLI flags |
-| `solo` | Forces single-node. Sets `min_nodes = max_nodes = 1`. |
-| `cluster` | Forces multi-node. Requires 2+ hosts. |
+New recipes should set `min_nodes` and `max_nodes` directly — they're explicit, compose cleanly with CLI overrides, and cover every case the older flags do.
 
 ### `min_nodes`
 
@@ -166,9 +154,21 @@ Maximum number of nodes supported. Defaults to unlimited.
 
 Set `max_nodes: 1` for models or runtimes that do not support multi-node inference.
 
-### `solo_only` / `cluster_only`
+### Deprecated: `mode`, `solo_only`, `cluster_only`
 
-Boolean shorthand flags:
+:::caution[Deprecated]
+`mode`, `solo_only`, and `cluster_only` are retained for backward compatibility with existing recipes, but are **deprecated** for new recipes. Use `min_nodes` / `max_nodes` instead — they're more explicit and compose cleanly with the rest of the recipe surface. The deprecated fields below are documented purely so legacy recipes remain readable.
+:::
+
+`mode` — explicit topology mode (`auto`, `solo`, or `cluster`). Inferred from `min_nodes` / `max_nodes` when omitted.
+
+| Value | Meaning |
+|---|---|
+| `auto` | (default) sparkrun decides based on node counts and CLI flags |
+| `solo` | Forces single-node. Sets `min_nodes = max_nodes = 1`. |
+| `cluster` | Forces multi-node. Requires 2+ hosts. |
+
+`solo_only` / `cluster_only` — boolean shorthand for the above:
 
 ```yaml
 solo_only: true     # equivalent to max_nodes: 1, mode: solo
@@ -236,7 +236,11 @@ metadata:
   model_dtype: nvfp4
 ```
 
-#### VRAM estimation fields
+#### VRAM estimation fields (optional)
+
+**Prefer auto-detection.** sparkrun pulls parameter counts, layer counts, head dimensions, and dtypes from each model's HuggingFace config — for the overwhelming majority of recipes you don't need to set any of these fields. They exist as **manual overrides** for the rare cases where auto-detect fails or returns misleading numbers, e.g., heavily-quantized variants, custom MoE topologies, or repos with missing/atypical `config.json` metadata.
+
+When you do need to override, the values in `metadata` take precedence over anything sparkrun infers from the model itself.
 
 | Field | Type | Description |
 |---|---|---|
@@ -249,7 +253,93 @@ metadata:
 | `model_vram` | float | Override: total model weight VRAM in GB |
 | `kv_vram_per_token` | float | Override: KV cache bytes per token |
 
-sparkrun auto-detects most of these from HuggingFace, but metadata values take precedence — useful for quantized models.
+Use `sparkrun show <recipe>` or `sparkrun recipe vram <recipe>` to see what auto-detection currently reports — start there and only fill in metadata fields when the displayed estimate is off.
+
+## Mods
+
+A **mod** is a named directory containing a `run.sh` script (plus any supporting files — patches, templates, env-setup snippets, etc.) that gets copied into the container and executed *before* the serve command. Mods are a builder/runtime-agnostic mechanism for small, named container tweaks (e.g., applying a Nemotron parser plugin, patching a Python module, dropping in custom config).
+
+Originally introduced for `eugr/spark-vllm-docker`, mods are now first-class in sparkrun: any recipe can declare them, any registry can publish them, and any runtime sees them as plain `pre_exec` entries after Phase 1 resolution. See [Execution Flow › Phase 1](/developer-reference/execution-flow/#phase-1-preparing).
+
+### Declaring mods
+
+`mods` is a **top-level** list field on the recipe:
+
+```yaml
+model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4
+runtime: vllm
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
+
+mods:
+  - mods/nemotron-nano          # resolved against the recipe's location / registry
+  - @eugr/mods/qwen3-tools      # explicitly scoped to the @eugr registry
+  - my-private-tweak            # short form — leading "mods/" is optional
+```
+
+The leading `mods/` prefix is purely a naming convention and is stripped during resolution, so `nemotron-nano` and `mods/nemotron-nano` are equivalent.
+
+### Resolution order
+
+For each entry in `mods:`, sparkrun walks four stages in order and uses the first hit:
+
+| # | Stage | What it looks for |
+|---|---|---|
+| 1 | **Explicit scoped reference** (`@registry/<rel>`) | Resolves `<rel>` under that registry's configured `mods_subpath`. Bypasses every other stage when the user opts in explicitly. |
+| 2 | **Adjacent to the recipe file** | Tries `<rel>` and `mods/<rel>` relative to the directory of the recipe YAML — works for local recipes and recipes shipped inside a registry repo. |
+| 3 | **Same registry as the recipe** | If the recipe came from a registry, tries `<mods_subpath>/<rel>` inside that registry (using the registry's configured `mods_subpath`). |
+| 4 | **`@eugr` fallback** | Falls back to the `eugr` registry — the original source of truth for mods, kept as a safety net for legacy recipes and shared community mods. |
+
+A mod source is valid when the target directory contains a `run.sh`. If none of the four stages find a match, `sparkrun run` fails loudly with the list of paths it tried.
+
+### Examples
+
+**Local mod adjacent to a local recipe** (stage 2):
+
+```
+./my-recipe.yaml
+./mods/fix-config/run.sh
+```
+
+```yaml
+# my-recipe.yaml
+mods:
+  - fix-config
+```
+
+Resolved via stage 2 — `dirname(my-recipe.yaml)/mods/fix-config/run.sh`. No registry needed.
+
+**Mod from the same registry as the recipe** (stage 3):
+
+A registry repo at `github.com/myteam/spark-recipes` ships:
+
+```
+recipes/qwen-tools.yaml
+mods/qwen3-tool-parser/run.sh
+```
+
+…and its `.sparkrun/registry.yaml` declares `mods: mods`. Then `qwen-tools.yaml` can reference:
+
+```yaml
+mods:
+  - qwen3-tool-parser
+```
+
+…and sparkrun finds it inside the same registry's `mods_subpath` (stage 3 — assuming it's not adjacent at stage 2).
+
+**Cross-registry reference with `@registry/`** (stage 1):
+
+```yaml
+# my-local-recipe.yaml
+mods:
+  - @official/nemotron-nano        # pulled from the @official registry's mods_subpath
+  - @eugr/mods/qwen3-coder         # pulled from @eugr, with explicit "mods/" prefix
+```
+
+Useful for mixing-and-matching mods from registries that don't own the recipe.
+
+**Legacy fallback to `@eugr`** (stage 4):
+
+A recipe authored against the original eugr workflow that just lists `mods: [nemotron-nano]` (no registry scope, not adjacent, not in its own registry) still resolves — sparkrun reaches stage 4 and looks up `nemotron-nano` inside the `@eugr` registry's `mods_subpath`. This keeps older v1 recipes working without modification.
 
 ## Runtime-specific fields
 
@@ -259,7 +349,6 @@ A dictionary for runtime-specific configuration:
 
 ```yaml
 runtime_config:
-  mods: [my-custom-mod]
   build_args: [--some-flag]
 ```
 

@@ -16,6 +16,7 @@ sparkrun includes the following registries out of the box:
 | `@sparkrun-transitional` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | Yes | Recipes originally part of sparkrun's built-in defaults, now maintained separately. |
 | `@experimental` | [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) | No | Experimental Spark Arena recipes. Less tested or using newer features. |
 | `@community` | [spark-arena/community-recipe-registry](https://github.com/spark-arena/community-recipe-registry) | No | Community-contributed recipes. |
+| `@atlas` | [Avarok-Cybersecurity/atlas-recipes](https://github.com/Avarok-Cybersecurity/atlas-recipes) | No | Official Atlas recipe registry (bundled as a default in sparkrun v0.2.31+). See the [Atlas runtime docs](/runtimes/atlas/) for details. |
 | `@sparkrun-testing` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | No | Internal testing registry with recipes, tuning configs, and benchmark profiles. |
 
 **Visible** registries appear in `sparkrun list` and `sparkrun search`. Hidden registries are still usable by name (e.g., `sparkrun run @experimental/my-recipe`) or with `sparkrun list --all`.
@@ -59,7 +60,12 @@ sparkrun registry list
 sparkrun registry add https://github.com/myorg/spark-recipes.git
 ```
 
-The repository will be cloned using a sparse checkout for efficiency. If recipes live in a subdirectory, they will be discovered automatically.
+The repository will be cloned using a sparse checkout for efficiency. If recipes live in a subdirectory, they will be discovered automatically. By default `registry add` also fetches all enabled registries afterwards to refresh the cache.
+
+```bash
+# Add without triggering the post-add refresh of all registries
+sparkrun registry add https://github.com/myorg/spark-recipes.git --no-update
+```
 
 :::note
 The repository must contain a `.sparkrun/registry.yaml` manifest file — see [Creating a registry](#creating-a-registry) below.
@@ -136,6 +142,10 @@ my-recipes/
 │       └── ...
 ├── benchmarking/               # optional — benchmark profiles
 │   └── my-model-bench.yaml
+├── mods/                       # optional — shared mods referenced from recipes (run.sh + supporting files)
+│   └── my-mod/
+│       ├── run.sh
+│       └── ...
 └── README.md
 ```
 
@@ -155,6 +165,7 @@ registries:
     recipes: recipes              # path to recipe YAML files
     tuning: tuning                # path to tuning configs (optional)
     benchmarks: benchmarking      # path to benchmark profiles (optional)
+    mods: mods                    # path to shared mods (optional)
 ```
 
 #### Manifest fields
@@ -166,8 +177,13 @@ registries:
 | `recipes` | no | `"recipes"` | Subdirectory containing recipe YAML files. |
 | `tuning` | no | `""` | Subdirectory containing Triton kernel tuning configs. |
 | `benchmarks` | no | `""` | Subdirectory containing benchmark profile YAML files. |
+| `mods` | no | `""` | Subdirectory containing shared mods (run.sh + supporting files) referenced from recipes' `mods:` field. Conventionally `mods` when present. |
 | `enabled` | no | `true` | Whether the registry is active on first add. |
 | `visible` | no | `true` | If `false`, recipes are hidden from default listings but still usable by name. |
+
+:::note[Canonical vs short keys]
+The local `~/.config/sparkrun/registries.yaml` uses canonical key names (`subpath`, `tuning_subpath`, `benchmark_subpath`, `mods_subpath`). Repo manifests support both the canonical names and the shorter aliases listed above (`recipes`, `tuning`, `benchmarks`, `mods`); when both are present, the canonical key wins.
+:::
 
 ### Multiple registries per repo
 

@@ -76,3 +76,7 @@ The Spark Arena team maintains several specialized container images for DGX Spar
 | `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5` | Optimized eugr vLLM for DGX Spark with Transformers 5.x | [GitHub](https://github.com/eugr/spark-vllm-docker) |
 | `dgx-spark-sglang` | Optimized SGLang for DGX Spark | [Link](https://hub.docker.com/r/scitrera/dgx-spark-sglang) |
 | `ghcr.io/spark-arena/dgx-llama-cpp` | Optimized llama.cpp for DGX Spark <br/>Mirror of `scitrera/dgx-spark-llama-cpp` | [Docker](https://hub.docker.com/r/scitrera/dgx-spark-llama-cpp) <br/> [GitHub](https://github.com/scitrera/cuda-containers) |
+
+:::tip[Sentinel images and managed rebuilds]
+The two `dgx-vllm-eugr-nightly*` names above are **sentinel images**: when used with the `:latest` tag, sparkrun's `eugr` builder treats them as an opt-in to **managed rebuilds** from the current state of [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker). Any other tag or any non-sentinel image is pulled normally and never silently rebuilt — so users who manage versioning outside sparkrun keep full control. See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images-for-managed-builds).
+:::

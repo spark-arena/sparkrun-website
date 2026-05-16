@@ -26,6 +26,8 @@ Every `sparkrun run` invocation follows a structured 6-phase pipeline, tracked b
 
 Resolves recipe configuration, port availability, container image, and generates a deterministic cluster ID from the recipe + host list + overrides. Also resolves the transfer mode (`auto`/`local`/`push`/`delegated`) and builds SSH kwargs.
 
+This phase also resolves the recipe's `mods:` field. For each `mods` entry, sparkrun looks up the named mod in the appropriate registry's `mods_subpath` (see [Manifest fields](/recipes/registries/#manifest-fields)), syncs the supporting files locally if needed, and injects the corresponding shell commands into the recipe's `pre_exec` list. The conversion is **builder-agnostic** — it runs before Phase 2 so resolution failures surface early, and so any builder (or no builder at all) sees a uniform `pre_exec` once mods are expanded.
+
 ### Phase 2: Building image
 
 Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling.
@@ -35,7 +37,16 @@ Builders prepare container images before distribution. Most recipes skip this ph
 | Builder | Description | When used |
 |---|---|---|
 | `docker-pull` | Default. Does nothing — relies on the distribution phase to pull images. | All recipes without an explicit `builder` field |
-| `eugr` | Builds [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) containers. Clones the repo, runs `build-and-copy.sh` with recipe-specified build args, and converts recipe `mods` into `pre_exec` entries. | Recipes with `builder: eugr`, v1 recipes with `build_args`/`mods`, or recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly` images (auto-detected) |
+| `eugr` | Builds [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) containers. Clones the repo and runs `build-and-copy.sh` with recipe-specified build args. The builder does **not** handle `mods` — those are resolved and expanded into `pre_exec` entries by Phase 1, builder-agnostic. | Recipes with `builder: eugr`, recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly[-tf5]` images at the `:latest` tag (sentinel images, auto-detected), or recipes with `build_args` (which still trigger this builder). The presence of `mods` alone also triggers it for backward compatibility with the original eugr-centric workflow. |
+
+#### Sentinel container images
+
+The `eugr` builder treats two image names as **sentinels** for opt-in managed rebuilds:
+
+- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest`
+- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest`
+
+When a recipe references one of these at the `:latest` tag, sparkrun maps it to a local build target and rebuilds from the upstream repo + currently-published wheels. Any other tag on these names — or any non-sentinel image — is pulled (or trusted locally) and never silently rebuilt. This keeps "build from upstream" an explicit user intent rather than a side effect of using `:latest`. See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images-for-managed-builds) for the user-facing explanation.
 
 #### Builder plugin interface
 
@@ -55,17 +66,19 @@ Custom builders are discovered via Python entry points in `pyproject.toml`, foll
 
 sparkrun distributes container images and model files to all target hosts before launching. The transfer mode (set per-cluster or per-command) controls how resources flow.
 
+Before this phase runs, sparkrun calls the runtime's `prepare()` hook (see [Recipe hooks](#recipe-hooks)), which can mutate the recipe's `distribution_config` — for example, vLLM/SGLang/Atlas all use `prepare()` to add the speculative-decoding **draft model** to the distribution list so it ships alongside the primary model.
+
 #### SSH stdin piping
 
 All remote operations use **SSH stdin piping** — scripts are generated as Python strings and piped to `ssh <host> bash -s`. No files are ever copied to remote hosts for orchestration purposes.
 
 #### Container sync
 
-Container images are distributed via `docker save | ssh docker load`. sparkrun checks image IDs on each target host and skips hosts that already have the correct image.
+Container images are distributed via `docker save | ssh docker load`. sparkrun matches images using both the local docker **image ID** and **`RepoDigests`** (the storage-driver-agnostic content hash) — a host is skipped if either matches, so the same `<registry>/<image>@sha256:...` is treated as "already present" even when local image IDs differ across drivers.
 
 #### Model sync
 
-Models are downloaded locally via HuggingFace Hub's `snapshot_download`, then rsynced to target hosts over the high-speed CX-7 network. GGUF models use colon syntax (`repo:quant`) for selective quant-file download.
+Models are downloaded locally via HuggingFace Hub's `snapshot_download`, then rsynced to target hosts over the high-speed CX-7 network. GGUF models use colon syntax (`repo:quant`) for selective quant-file download. If `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN`) is set in the control-machine environment, sparkrun forwards it into the remote sync scripts so gated repos download successfully on workers too.
 
 #### InfiniBand / NCCL auto-configuration
 
@@ -146,10 +159,11 @@ NCCL-related variables (`NCCL_SOCKET_IFNAME`, `UCX_NET_DEVICES`, etc.) and `HF_T
 
 ## Recipe hooks
 
-Recipes can define shell commands that run inside containers at specific lifecycle points:
+Recipes (and runtimes) can mutate or inject behavior at specific lifecycle points:
 
-- **`pre_exec`** — runs after container launch but before the serve command starts. Used by the `eugr` builder to inject mods.
-- **`post_exec`** — runs after a successful detached launch (Phase 6), once the serve port is ready. Executes inside the head container.
+- **`prepare()`** — runtime-side hook called between Phase 2 (Building image) and Phase 3 (Distributing resources). Runtimes use this to mutate the recipe's `distribution_config` so additional models or containers ship to all hosts. All current vLLM, SGLang, and Atlas runtimes use this to pre-sync the speculative-decoding draft model when configured. Not user-facing — implemented in runtime plugins.
+- **`pre_exec`** — recipe-level shell commands. Run after container launch but before the serve command starts. Recipe `mods:` entries are expanded into `pre_exec` during Phase 1.
+- **`post_exec`** — recipe-level shell commands. Run after a successful detached launch (Phase 6), once the serve port is ready. Executes inside the head container.
 - **`post_commands`** — registry-defined hooks that run on the host (not inside the container) after a successful launch. Requires `--trust` for third-party registries.
 
 ```yaml

@@ -28,6 +28,30 @@ Both `vllm-distributed` and `vllm-ray` use the same container images. sparkrun w
 
 We recommend that you use the Spark Arena images for sparkrun recipes; when you use the official Spark Arena images, sparkrun will automatically manage using the latest eugr/spark-vllm-docker.
 
+### Sentinel images for managed builds
+
+The two Spark Arena nightly image names — `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest` and `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest` — are **sentinel images**. They resolve to real container images, but when you pair them with the `:latest` tag, sparkrun's `eugr` builder treats them as an explicit user opt-in to **managed rebuilds**: it will clone the upstream [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) repo and build a fresh image from the current state of that repo (and current available wheels) before each launch.
+
+This is the **default for all official v2 recipes** because it gives users a stable, single name to reference while sparkrun handles versioning. To opt out:
+
+- Use any **non-`:latest` tag** (e.g. `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:2026-03-01`) — sparkrun will pull that immutable tag and never rebuild.
+- Use a **non-sentinel image name** (any image not under `ghcr.io/spark-arena/dgx-vllm-eugr-nightly*`) — sparkrun will pull (or rely on the local copy) and never rebuild, even at `:latest`.
+
+The sentinel design is intentional: using a local image often implies the user manages versioning outside sparkrun, so sparkrun never silently forces a rebuild of an arbitrary `:latest` image. Sentinels make the "rebuild from upstream" intent explicit.
+
+See [Phase 2: Building image](/developer-reference/execution-flow/#phase-2-building-image) for the full builder lifecycle.
+
+## Speculative decoding
+
+When a recipe sets `speculative_config` in `defaults` and the JSON blob has a top-level `model` field, sparkrun automatically pre-syncs that draft model to all target hosts alongside the primary model. This happens during the [distribution phase](/developer-reference/execution-flow/#phase-3-distributing-resources) so the container never has to fetch the draft from HuggingFace at launch time (which would fail under sparkrun's offline-hub default).
+
+```yaml
+defaults:
+  speculative_config: '{"method": "dflash", "model": "z-lab/Qwen3.6-35B-A3B-DFlash", "num_speculative_tokens": 5}'
+```
+
+Both `vllm-distributed` and `vllm-ray` honor this — they share the same `VllmMixin.detect_spec_config_draft_model` resolver. The full `speculative_config` JSON is passed through to `vllm serve` via the `--speculative-config` flag; sparkrun only inspects the `model` field to wire up pre-sync.
+
 ## Runtime alias resolution
 
 When a recipe specifies `runtime: vllm` (or omits `runtime` entirely), sparkrun resolves it to a concrete runtime in this order:
@@ -89,6 +113,22 @@ sparkrun run qwen3-1.7b-vllm --tp 2
 In this case, the recipe default is for single node with tensor_parallel of 1, but we override tensor parallel to leverage 2 DGX Sparks.
 
 No Ray cluster is involved — vLLM coordinates the nodes directly via its native distributed backend. See [Execution Flow](/developer-reference/execution-flow/) for the full multi-node orchestration details.
+
+### Tensor, pipeline, and data parallelism
+
+`vllm-distributed` supports three parallelism regimes on DGX Spark (one GPU per node, so each parallel dimension consumes physical hosts):
+
+| Mode | Defaults | Behavior |
+|---|---|---|
+| Cross-node TP/PP, single replica | `tensor_parallel: N` or `pipeline_parallel: N` (DP=1) | sparkrun appends `--nnodes`, `--node-rank`, `--master-addr`, `--master-port`; worker ranks get `--headless`. |
+| Pure data parallelism | `data_parallel: N` (TP=PP=1) | Each node is its own replica; sparkrun appends `--data-parallel-size`, `--data-parallel-rank`, `--data-parallel-address`, `--data-parallel-rpc-port`. |
+| Hybrid (TP/PP × DP) | `tensor_parallel: T, data_parallel: D` | sparkrun maps replicas to host groups of size `T·PP`; `--master-addr` is the first host of each replica; both flag sets are emitted. |
+
+Required node count = `tensor_parallel × pipeline_parallel × data_parallel`. The `data_parallel_rpc_port` defaults to `13345` and can be overridden in recipe defaults.
+
+:::caution[vllm-ray and data parallelism]
+`vllm-ray` currently does **not** support `data_parallel > 1`. Use `vllm-distributed` (omit `distributed_executor_backend: ray`) for DP workloads. The Ray runtime's `validate_recipe` will reject DP > 1 with a clear error.
+:::
 
 ## Multi-node with vllm-ray
 

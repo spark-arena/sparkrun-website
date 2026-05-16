@@ -153,6 +153,16 @@ sparkrun_benchmark:
 
 The output filename is auto-generated as `benchmark_<recipe>_<profile>_tp<N>.yaml` (with `_pp<N>` suffix when pipeline parallelism > 1) unless `--out` is specified.
 
+## Scheduling and resumability
+
+Multi-task benchmark runs (a profile with several `pp`/`tg`/`depth`/`concurrency` combinations) are driven by a small scheduler that persists progress between tasks. State is checkpointed after each task, so an interrupted run can be resumed without re-executing completed tasks — useful when a long sweep is killed by a transient failure, an OOM, or `Ctrl+C` mid-sweep.
+
+`--exit-on-first-fail` (default) stops the sweep on the first task failure so the issue can be addressed before more compute is spent; `--no-exit-on-first-fail` keeps marching through remaining tasks. State files live under `~/.cache/sparkrun/benchmarks/`.
+
+### Framework version pinning
+
+To keep results comparable across long sweeps, sparkrun pins the benchmarking framework version on the first task of a run and reuses that exact version for every subsequent task in the same run (including resumed tasks). For `llama-benchy`, this means the `uvx llama-benchy@<version>` reference is locked once and propagated to every task in the schedule — even if a newer release is published mid-sweep. The pinned version is captured in the benchmark output metadata.
+
 ## llama-benchy framework
 
 The default benchmarking framework is [llama-benchy](https://github.com/eugr/llama-benchy), invoked via `uvx llama-benchy`. It benchmarks OpenAI-compatible inference endpoints with configurable prompt sizes, token generation counts, and concurrency levels.

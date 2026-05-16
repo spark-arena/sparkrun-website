@@ -146,6 +146,19 @@ Present-when-truthy flags (no value emitted):
 | `high_speed_swap` | `--high-speed-swap` |
 | `require_auth` | `--require-auth` |
 
+## Speculative decoding
+
+When a recipe sets `draft_model` in `defaults`, sparkrun automatically pre-syncs that model to all target hosts alongside the primary model — the same way it pre-syncs draft models for vLLM and SGLang speculative recipes. This happens during the [distribution phase](/developer-reference/execution-flow/#phase-3-distributing-resources) so the container never has to fetch the draft from HuggingFace at launch time (which would fail under sparkrun's offline-hub default).
+
+```yaml
+defaults:
+  speculative: true
+  draft_model: avarok/qwen3.5-35b-a3b-nvfp4-draft
+  num_drafts: 2
+```
+
+This works with any of the speculative modes (`speculative`, `self_speculative`, `ngram_speculative`, `dflash`); the only requirement is that the draft model name is set in `defaults.draft_model`.
+
 ## Parallelism model
 
 Atlas derives `world_size` from `tensor_parallel` and `ep_size`:
