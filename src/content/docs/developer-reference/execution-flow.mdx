@@ -30,37 +30,9 @@ This phase also resolves the recipe's `mods:` field. For each `mods` entry, spar
 
 ### Phase 2: Building image
 
-Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling.
+Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling. The `eugr` builder is the main "real" builder; it's invoked when a recipe sets `builder: eugr`, declares `build_args`, or references an eugr-nightly **sentinel image** (`ghcr.io/spark-arena/dgx-vllm-eugr-nightly[-tf5]:latest`) which signals an opt-in managed rebuild from upstream wheels.
 
-#### Built-in builders
-
-| Builder | Description | When used |
-|---|---|---|
-| `docker-pull` | Default. Does nothing — relies on the distribution phase to pull images. | All recipes without an explicit `builder` field |
-| `eugr` | Builds [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) containers. Clones the repo and runs `build-and-copy.sh` with recipe-specified build args. The builder does **not** handle `mods` — those are resolved and expanded into `pre_exec` entries by Phase 1, builder-agnostic. | Recipes with `builder: eugr`, recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly[-tf5]` images at the `:latest` tag (sentinel images, auto-detected), or recipes with `build_args` (which still trigger this builder). The presence of `mods` alone also triggers it for backward compatibility with the original eugr-centric workflow. |
-
-#### Sentinel container images
-
-The `eugr` builder treats two image names as **sentinels** for opt-in managed rebuilds:
-
-- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest`
-- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest`
-
-When a recipe references one of these at the `:latest` tag, sparkrun maps it to a local build target and rebuilds from the upstream repo + currently-published wheels. Any other tag on these names — or any non-sentinel image — is pulled (or trusted locally) and never silently rebuilt. This keeps "build from upstream" an explicit user intent rather than a side effect of using `:latest`. See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images-for-managed-builds) for the user-facing explanation.
-
-#### Builder plugin interface
-
-Builders extend `BuilderPlugin` (from `sparkrun.builders.base`), an SAF Plugin registered under the `sparkrun.builder` extension point:
-
-| Method | Purpose |
-|---|---|
-| `prepare_image()` | Ensure the container image is available. Returns the final image name. |
-| `validate_recipe()` | Validate builder-specific recipe fields. Returns a list of issue strings. |
-| `version_info_commands()` | Return shell commands to capture version info from inside the container. |
-| `process_version_info()` | Process raw command output into flat key-value pairs for runtime info. |
-| `collect_container_labels()` | Inspect container OCI labels via `docker inspect`. |
-
-Custom builders are discovered via Python entry points in `pyproject.toml`, following the SAF plugin pattern.
+For the full builder catalog, sentinel-image semantics, the `defaults.builders.eugr.use_sentinel_image` opt-out, build hygiene/observability (per-build logs, phase-aware errors, post-build flashinfer smoke test), and the `BuilderPlugin` interface, see [Builders](/developer-reference/builders/).
 
 ### Phase 3: Distributing resources
 

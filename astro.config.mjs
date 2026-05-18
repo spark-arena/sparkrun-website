@@ -133,6 +133,7 @@ gtag('config', 'G-LPQWBYH74V');`,
                     items: [
                         {label: 'CLI Automation', slug: 'developer-reference/cli-automation'},
                         {label: 'Execution Flow', slug: 'developer-reference/execution-flow'},
+                        {label: 'Builders', slug: 'developer-reference/builders'},
                         {label: 'Architecture', slug: 'developer-reference/architecture'},
                         {label: 'Contributing', slug: 'developer-reference/contributing'},
                     ],
