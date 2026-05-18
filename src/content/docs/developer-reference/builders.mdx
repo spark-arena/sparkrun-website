@@ -1,0 +1,106 @@
+---
+title: Builders
+description: Container image builders, sentinel images, configuration defaults, and the builder plugin interface.
+---
+
+Builders prepare container images before sparkrun distributes them to target hosts and launches the runtime. They run during [Phase 2 of the launch lifecycle](/developer-reference/execution-flow/#phase-2-building-image).
+
+Most recipes skip builder work entirely — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling on each host. The `eugr` builder is the main "real" builder, used for the eugr/spark-vllm-docker family of images.
+
+## Built-in builders
+
+| Builder | Description | When used |
+|---|---|---|
+| `docker-pull` | Default. Does nothing — relies on the distribution phase to pull images. | All recipes without an explicit `builder` field. |
+| `eugr` | Builds [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) containers. Clones the repo and runs `build-and-copy.sh` with recipe-specified build args. The builder does **not** handle `mods` — those are resolved and expanded into `pre_exec` entries by Phase 1, builder-agnostic (see [Recipes › Mods](/recipes/format/#mods) for the full mods spec). | Recipes with `builder: eugr`, recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly[-tf5]` images at the `:latest` tag (sentinel images, auto-detected), or recipes with `build_args` (which still trigger this builder). The presence of `mods` alone also triggers it for backward compatibility with the original eugr-centric workflow. |
+
+## Sentinel container images
+
+The `eugr` builder treats two image names as **sentinels** for opt-in managed rebuilds:
+
+- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest`
+- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest`
+
+When a recipe references one of these at the `:latest` tag, sparkrun maps it to a local build target (`sparkrun-eugr-vllm` / `sparkrun-eugr-vllm-tf5`) and rebuilds from the upstream repo + currently-published wheels. Any other tag on these names — or any non-sentinel image — is pulled (or trusted locally) and never silently rebuilt. This keeps "build from upstream" an explicit user intent rather than a side effect of using `:latest`. See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images-for-managed-builds) for the user-facing explanation.
+
+### Disabling sentinel image handling
+
+The sentinel remap is ON by default. Power users can disable it via the `defaults.builders.eugr.use_sentinel_image` configuration option in `~/.config/sparkrun/config.yaml`:
+
+```yaml
+defaults:
+  builders:
+    eugr:
+      use_sentinel_image: false   # treat :latest as a regular pullable image
+```
+
+With this set to `false`:
+
+- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest` flows through as a normal pullable image — sparkrun pulls the published GHCR image and never invokes the rebuild path.
+- The post-build flashinfer smoke test (which only runs on builds) is also skipped, since no build happens.
+- Recipes that explicitly set `build_args` still trigger the `eugr` builder — the toggle only affects the implicit `:latest` sentinel mapping.
+
+This is the right setting when the upstream `:latest` GHCR image is healthy and the time/bandwidth of a local rebuild is not justified.
+
+## Persisting build logs
+
+The `eugr` builder captures all combined stdout/stderr from `build-and-copy.sh` in memory so a build failure can always report the last ~80 lines of context plus the inferred phase. By default it does **not** write that output to disk — when the build succeeds the log is discarded, keeping `~/.cache/sparkrun/` lean for typical day-to-day runs.
+
+When you're actively debugging a misbehaving build and want a full persistent record, enable `defaults.builders.eugr.save_build_logs`:
+
+```yaml
+defaults:
+  builders:
+    eugr:
+      save_build_logs: true   # persist the full build-and-copy.sh log to disk
+```
+
+With this enabled:
+
+- Each rebuild writes its combined output to `<cache_dir>/eugr-builds/<safe_image>-<YYYYMMDD-HHMMSS>.log` (and `-remote-<host>.log` for delegated builds).
+- The build log path is logged at INFO+ so you can `tail -f` it while the build runs.
+- On failure, the `RuntimeError` and the `ERROR`-level summary both point at the persisted log file.
+
+When `save_build_logs` is `false` (the default) and a build fails, the error message instead nudges the user to enable the setting before re-running so the next attempt has a full record on disk. The in-memory error tail is unaffected either way — phase and last-lines context are always surfaced regardless of disk persistence.
+
+## Build hygiene and observability
+
+The `eugr` builder includes several safety nets that activate when a rebuild does happen:
+
+- **`--cleanup` always appended.** sparkrun appends `--cleanup` to every `build-and-copy.sh` invocation so the upstream script starts from a clean `./wheels/` directory and an empty set of `.*-commit` markers each time. This eliminates wheel-state drift across runs (stale commit files, half-restored backups after a failed download, dash-vs-underscore wheel-name collisions). The flag is added to an **effective** copy of `build_args` only — the cache identity stored under `build_args` remains tied to the recipe's canonical args so subsequent runs still hit the build cache.
+- **In-memory log capture (always on).** Combined stdout/stderr from `build-and-copy.sh` is captured in memory so the last ~80 lines plus an inferred phase can be surfaced on failure regardless of verbosity. At `-v` (INFO+) the output also streams to the terminal in real time. Optional **on-disk persistence** is gated by `defaults.builders.eugr.save_build_logs` (default `false`) — see [Persisting build logs](#persisting-build-logs) below.
+- **Phase-aware error context.** On a non-zero build exit, sparkrun parses the captured log against phase markers (`FlashInfer build command`, `vLLM build command`, `Building runner image with command`, `FlashInfer build failed`, `Error: No wheel files found`, etc.) and includes the inferred phase in the `RuntimeError` message — e.g. `phase=flashinfer-build (failed)` — so the failure point is obvious without rummaging through scrollback.
+- **Post-build flashinfer smoke test.** After a successful build, sparkrun runs `docker run --rm --entrypoint= <image> python3 -c "import flashinfer; import flashinfer_cubin; import flashinfer_jit_cache"`. If any import fails, the broken tag is removed via `docker rmi` (so the next launch retries from scratch instead of hitting a cached broken image) and a `RuntimeError` is raised with the captured `ImportError` — telling the user *which* sub-package is missing.
+- **Build cache.** When the upstream wheel hashes haven't changed and the locally tagged image still exists with the same image ID, the rebuild is skipped entirely. Cache entries are stored under `<cache_dir>/eugr-build-cache.json`. The cache key is host-qualified for delegated builds so per-host artifacts are tracked independently.
+
+## Builder plugin interface
+
+Builders extend `BuilderPlugin` (from `sparkrun.builders.base`), an SAF Plugin registered under the `sparkrun.builder` extension point:
+
+| Method | Purpose |
+|---|---|
+| `prepare_image()` | Ensure the container image is available. Returns the final image name. |
+| `validate_recipe()` | Validate builder-specific recipe fields. Returns a list of issue strings. |
+| `version_info_commands()` | Return shell commands to capture version info from inside the container. |
+| `process_version_info()` | Process raw command output into flat key-value pairs for runtime info. |
+| `collect_container_labels()` | Inspect container OCI labels via `docker inspect`. |
+
+Custom builders are discovered via Python entry points in `pyproject.toml`, following the SAF plugin pattern.
+
+### Reading user config defaults
+
+Builders may read soft defaults from the user's `~/.config/sparkrun/config.yaml` under `defaults.builders.<builder-name>`:
+
+```python
+class MyBuilder(BuilderPlugin):
+    builder_name = "my-builder"
+
+    def prepare_image(self, image, recipe, hosts, config=None, ...):
+        opts = config.get_defaults_builder(self.builder_name) if config else {}
+        verbose = bool(opts.get("verbose", False))
+        ...
+```
+
+`SparkrunConfig.get_defaults_builder(name)` returns the matching dict, or `{}` when the section is absent or malformed. Recipe fields and explicit CLI overrides should always win over these defaults — treat them as the lowest-priority layer.
+
+A symmetric `get_defaults_runtime(name)` exists for runtime plugins that want the same shape of user-configurable defaults under `defaults.runtimes.<runtime-name>`.
