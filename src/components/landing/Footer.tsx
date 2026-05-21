@@ -28,6 +28,8 @@ export default function Footer() {
         <div className="footer-column">
           <h4>Community</h4>
           <ul>
+            <li><a href="https://discord.gg/dTWzMC2u">Discord</a></li>
+            <li><a href="https://x.com/spark_arena">X / Twitter</a></li>
             <li><a href="https://github.com/spark-arena/sparkrun">GitHub</a></li>
             <li><a href="https://github.com/spark-arena/sparkrun/issues">Issues</a></li>
             <li><a href="https://pypi.org/project/sparkrun/">PyPI</a></li>
