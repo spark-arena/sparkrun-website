@@ -20,7 +20,7 @@ export default defineConfig({
             },
             social: [
                 {icon: 'github', label: 'GitHub', href: 'https://github.com/spark-arena/sparkrun'},
-                {icon: 'discord', label: 'Discord', href: 'https://discord.gg/dTWzMC2u'},
+                {icon: 'discord', label: 'Discord', href: 'https://discord.gg/S9cXJsdBr'},
                 {icon: 'x.com', label: 'X', href: 'https://x.com/spark_arena'},
             ],
             customCss: [
