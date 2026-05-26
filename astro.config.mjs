@@ -9,6 +9,9 @@ export default defineConfig({
         host: true, // Equivalent to --host flag
     },
     output: 'static',
+    redirects: {
+        '/recipes/overview/': '/recipes/format/',
+    },
     integrations: [
         starlight({
             title: 'sparkrun',
