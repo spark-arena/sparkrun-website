@@ -8,6 +8,7 @@ export default function HeroVideo() {
     if (!playerRef.current) return;
     let player: { dispose?: () => void } | null = null;
     let cancelled = false;
+    // @ts-ignore
     import('asciinema-player').then((AsciinemaPlayer) => {
       if (cancelled || !playerRef.current) return;
       player = AsciinemaPlayer.create('/sparkrun-demo.cast', playerRef.current, {
