@@ -28,9 +28,43 @@ Resolves recipe configuration, port availability, container image, and generates
 
 This phase also resolves the recipe's `mods:` field. For each `mods` entry, sparkrun looks up the named mod in the appropriate registry's `mods_subpath` (see [Manifest fields](/recipes/registries/#manifest-fields)), syncs the supporting files locally if needed, and injects the corresponding shell commands into the recipe's `pre_exec` list. The conversion is **builder-agnostic** — it runs before Phase 2 so resolution failures surface early, and so any builder (or no builder at all) sees a uniform `pre_exec` once mods are expanded.
 
+#### Placement and backend selection
+
+Before Phase 2 runs, sparkrun resolves three things from the cluster's per-host
+hardware metadata:
+
+1. **Per-host `BackendBundle`** — `core/launcher.py:resolve_per_host_backends()`
+   walks `host_list` and calls `core/backend_select.py:select_backends(hw)` on
+   each host's `HostHardware`. The result (`accelerator_vendor` +
+   `CollectiveBackend`) is threaded through to `runtime.run(..., backends=...)`
+   and persisted in job metadata. Hosts that fail to resolve a bundle (unknown
+   vendor, multi-vendor host) are dropped from the map; per-host env then flows
+   through `runtimes/_cluster_ops.py:resolve_comm_env(ctx, comm_env, backends)`,
+   which falls back to the legacy NCCL generator for those hosts —
+   byte-identical output for NVIDIA. (The old `resolve_ib_env` wrapper has been
+   removed; `resolve_comm_env` is the only path.)
+2. **Compatibility check** — for runtimes that declare `requires_capability:
+   {"rdma:roce-v2"}` (or similar), the central check
+   (`runtimes/compatibility.py:check_runtime_host_compatibility`) verifies
+   every placed host satisfies the set. Failures raise
+   `IncompatibleHardwareError` before any side effects (no container pull, no
+   model sync, no docker run).
+3. **Platform validation** — `platforms/resolve_platform(hw)` picks the
+   first matching `HardwarePlatformPlugin` (DGX Spark before Generic NVIDIA),
+   and its `validate_host(hw)` returns warning strings. sparkrun logs each
+   warning; it does not raise. Hosts without explicit metadata default to DGX
+   Spark so the check always runs against something sensible.
+
+For multi-rank workloads on heterogeneous-vendor clusters, recipes must also
+declare an explicit `layout:` block (`core/layout.py:RecipeLayout`) — an
+experimental surface, see
+[Schedulers & Placement](/advanced/schedulers/#explicit-placement-with-layout).
+The auto-packer (`core/placement.py:compute_placement`) refuses to guess which
+ranks land on which accelerator vendor.
+
 ### Phase 2: Building image
 
-Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling. The `eugr` builder is the main "real" builder; it's invoked when a recipe sets `builder: eugr`, declares `build_args`, or references an eugr-nightly **sentinel image** (`ghcr.io/spark-arena/dgx-vllm-eugr-nightly[-tf5]:latest`) which signals an opt-in managed rebuild from upstream wheels.
+Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling. The `eugr` builder is the main "real" builder; it's invoked when a recipe sets `builder: eugr`, declares `build_args`, or references an eugr-nightly **sentinel image** at `:latest`. Since eugr's July 2026 move to published images the builder is pull-first — it resolves the sentinel to the authoritative nightly and pulls it, and only runs `build-and-copy.sh` when `build_args` request a wheels or custom build. See [Builders](/developer-reference/builders/).
 
 For the full builder catalog, sentinel-image semantics, the `defaults.builders.eugr.use_sentinel_image` opt-out, build hygiene/observability (per-build logs, phase-aware errors, post-build flashinfer smoke test), and the `BuilderPlugin` interface, see [Builders](/developer-reference/builders/).
 

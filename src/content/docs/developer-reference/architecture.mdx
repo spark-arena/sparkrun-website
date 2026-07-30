@@ -9,41 +9,76 @@ This page provides an overview of sparkrun's source code organization, plugin sy
 
 ```
 src/sparkrun/
-├── cli/                # Click CLI package
+├── cli/                # Click CLI package — a renderer over api/
+├── api/                # Console-free public library API (see below)
 ├── core/               # Core data models, bootstrap, and business logic
-├── runtimes/           # Runtime plugins (vllm, sglang, llama-cpp, trtllm)
-├── orchestration/      # SSH, Docker, InfiniBand, script execution primitives
+├── runtimes/           # Runtime plugins (vllm, sglang, llama-cpp, trtllm, atlas, …)
+├── orchestration/      # SSH, Docker, InfiniBand, executors, collectives, telemetry
+├── transports/         # Cluster connectivity seam — how hosts are reached/prepared
+├── schedulers/         # Placement schedulers (greedy, occupancy-sparse/-dense)
+├── platforms/          # Hardware platform registry (DGX Spark, generic NVIDIA)
 ├── models/             # HuggingFace model download, distribution, and VRAM estimation
 ├── containers/         # Container image distribution (docker save/load over SSH)
 ├── tuning/             # Triton fused MoE kernel tuning for SGLang and vLLM
 ├── builders/           # Container image builder plugins (docker-pull, eugr)
 ├── diagnostics/        # Host and run diagnostic collection (NDJSON output)
-├── proxy/              # LiteLLM-based inference proxy gateway
+├── proxy/              # Inference gateway (LiteLLM engine + gateway selection)
 ├── benchmarking/       # Benchmark framework plugins and result export
+├── telemetry/          # Anonymous usage telemetry (opt-out)
 ├── utils/              # Shared helpers (coerce_value, suppress_noisy_loggers, etc.)
 └── scripts/            # Embedded bash scripts (IB detection, container launch, etc.)
 ```
 
+## Layering
+
+```
+cli/  →  api/  →  {core/, orchestration/, transports/, …}
+```
+
+`api/` is console-free — it never writes to stdout/stderr and never calls
+`sys.exit()` — and it does **not** import `sparkrun.cli`. The CLI is a thin
+renderer over it, so anything the CLI does is reachable from Python. See
+[Python API](/developer-reference/python-api/).
+
+`transports/` may import `core/` and `orchestration/`; `orchestration/` never
+imports `transports/`.
+
 ## Plugin system (SAF)
 
-sparkrun uses [scitrera-app-framework](https://github.com/scitrera/python-app-framework) (SAF) for plugin discovery and lifecycle management. Three types of plugins are registered:
+sparkrun uses [scitrera-app-framework](https://github.com/scitrera/python-app-framework) (SAF) for plugin discovery and lifecycle management. Each extension point is discovered by scanning a module for subclasses of a base class:
 
-| Plugin type | Base class | Extension point | Discovery |
+| Plugin type | Base class | Extension point | Module scanned |
 |---|---|---|---|
-| Runtimes | `RuntimePlugin` | `sparkrun.runtime` | `find_types_in_modules("sparkrun.runtimes", RuntimePlugin)` |
-| Builders | `BuilderPlugin` | `sparkrun.builder` | `find_types_in_modules("sparkrun.builders", BuilderPlugin)` |
-| Benchmarking | `BenchmarkingPlugin` | `sparkrun.benchmarking` | `find_types_in_modules("sparkrun.benchmarking", BenchmarkingPlugin)` |
+| Runtimes | `RuntimePlugin` | `sparkrun.runtime` | `sparkrun.runtimes` |
+| Builders | `BuilderPlugin` | `sparkrun.builder` | `sparkrun.builders` |
+| Benchmarking | `BenchmarkingPlugin` | `sparkrun.benchmarking` | `sparkrun.benchmarking` |
+| Executors | `Executor` | `sparkrun.executor` | `sparkrun.orchestration.executors` |
+| Schedulers | `Scheduler` | `sparkrun.scheduler` | `sparkrun.schedulers` |
+| Transports | `Transport` | `sparkrun.transport` | `sparkrun.transports` |
+| Telemetry providers | `TelemetryProvider` | `sparkrun.telemetry` | `sparkrun.orchestration.telemetry` |
 
-All plugins are discovered via Python entry points defined in `pyproject.toml`.
+Hardware platforms are the exception: `platforms/` keeps an ordered in-process
+registry rather than going through SAF, because resolution is *order-sensitive*
+(most-specific `matches()` wins). Transports, which select by exact name, moved
+onto SAF; platforms did not.
 
 ### Bootstrap flow
 
 ```
 cli/__init__.py → core.bootstrap.init_sparkrun()
     → SAF init_framework_desktop()
-    → find_types_in_modules() for runtimes, builders, benchmarking
+    → find_types_in_modules() over each module above
     → register_plugin() for each discovered plugin
+    → load_external_plugins(v)   # out-of-tree, gated off by default
 ```
+
+Schedulers and transports skip base classes with a blank `scheduler_name` /
+`transport_name`. A plugin can gate itself behind a
+[feature flag](/advanced/feature-flags/) by declaring `required_feature_flag`;
+SAF then only exposes it when the flag resolves on.
+
+Out-of-tree plugins load last, from `plugins.paths` in `config.yaml` — see
+[External Plugins](/advanced/plugins/).
 
 ### Runtime plugins
 
@@ -54,11 +89,52 @@ Key methods:
 - `resolve_container()` — determine the container image to use
 - `cluster_strategy()` — return `"ray"`, `"native"`, or `"native/rpc"` to select orchestration path
 
+## Multiplatform architecture
+
+As of 0.3.0 sparkrun has a layered hardware / platform model that future
+AMD and Intel Gaudi support builds against. Today **NVIDIA DGX Spark** is the
+only fully-wired platform; RCCL (AMD) and HCCL (Intel) ship as scaffolds.
+
+```
+                       launch_inference()
+                              |
+            +-----------------+-----------------+
+            |                                   |
+            v                                   v
+ resolve_per_host_backends           resolve_platform
+   (HostHardware → BackendBundle)     (HostHardware → HardwarePlatformPlugin)
+            |                                   |
+            v                                   v
+ select_backends(HostHardware)         validate_host(hw)  (warnings)
+   - accelerator_vendor_for           default_image(runtime)
+   - collectives.get_backend(vendor)
+            |
+            v
+ BackendBundle threaded through to runtime.run(..., backends=...)
+   - runtime calls _cluster_ops.resolve_comm_env(ctx, comm_env, backends)
+```
+
+Seams contributors plug into:
+
+| Layer                            | File                                                          |
+|----------------------------------|---------------------------------------------------------------|
+| Per-host hardware model          | `core/hardware.py` (`AcceleratorSpec`, `HostHardware`)         |
+| Combined accelerator + IB probe  | `core/hardware_probe.py` (`probe_host`, `probe_hosts`)         |
+| Per-host backend selection       | `core/backend_select.py` (`select_backends`)                   |
+| Rank-to-host placement           | `core/placement.py`, `core/layout.py`                          |
+| Collective backend abstraction   | `orchestration/collectives/` (`nccl`, `rccl`, `hccl`)           |
+| Hardware platform plugins        | `platforms/` (`dgx_spark`, `nvidia_generic`)                    |
+| Executor abstraction             | `orchestration/executor.py`, `orchestration/executors/`         |
+
+For the public-facing summary see [Multiplatform](/advanced/multiplatform/);
+the contributor-facing deep dive lives in
+[`docs/MULTIPLATFORM.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/MULTIPLATFORM.md).
+
 ## Core modules
 
 | Module | Purpose |
 |---|---|
-| `core/bootstrap.py` | SAF plugin initialization, runtime and benchmarking framework discovery |
+| `core/bootstrap.py` | SAF plugin initialization and discovery across every extension point |
 | `core/config.py` | `SparkrunConfig` — reads `~/.config/sparkrun/config.yaml`, cache dir resolution |
 | `core/registry.py` | `RegistryManager` — git-based recipe registry system |
 | `core/recipe.py` | `Recipe` loading, validation, v1→v2 migration, config chain via SAF Variables |
@@ -66,17 +142,73 @@ Key methods:
 | `core/hosts.py` | Host resolution priority chain (CLI → file → cluster → default) |
 | `core/pending_ops.py` | PID-based lock files for in-progress operations |
 | `core/benchmark_profiles.py` | Benchmark profile discovery and rendering across registries |
+| `core/launcher.py` | `launch_inference()`, per-host backend resolution, recipe trust resolution |
+| `core/scheduler.py` | `Scheduler` ABC, `EXT_SCHEDULER`, selector resolution chain |
+| `core/cluster_status.py` | `ClusterStatus` — the data-only occupancy snapshot shape |
+| `core/features.py` | Channel-aware [feature flags](/advanced/feature-flags/) |
+| `core/hardware.py`, `core/hardware_probe.py` | `AcceleratorSpec` / `HostHardware` + the combined accelerator/IB probe |
+| `core/backend_select.py` | `select_backends(HostHardware) -> BackendBundle` |
+| `core/placement.py`, `core/layout.py` | Rank → (host, local-GPU) placement and the recipe `layout:` model |
+| `core/limits.py` | Usable-memory cap resolution for scheduling and fit |
+| `core/external_plugins.py` | Out-of-tree plugin loading from `plugins.paths` |
+
+## The api layer
+
+`api/` is the contract non-CLI callers depend on. Two conventions matter:
+
+- **Errors are typed.** Everything derives from `api.SparkrunError`; internal
+  exceptions (`InfeasibleScheduleError`, `LayoutConflictError`, …) are
+  translated at the api boundary.
+- **`sctx` threads a session.** Every entry point takes an optional
+  `SparkrunContext` so a chain of calls shares config, registry manager, and
+  cluster manager instead of rebuilding them.
+
+Larger surfaces get their own sub-namespace (`api.proxy`, `api.setup`,
+`api.tailscale`), each following the same shape: `_ops.py` for the console-free
+logic, `_errors.py` for the typed exceptions, `__init__.py` re-exporting both.
+
+### Status discovery
+
+All "what's running where?" questions flow through one source, in two tiers:
+
+| Function | Tier |
+|---|---|
+| `api.status()` | Lean occupancy snapshot (`ClusterStatus`) — consumed by schedulers, placement, proxy discovery, teardown |
+| `api.status_report()` | Display tier — classifies the snapshot into groups/solo/idle/pending and enriches it with cached job metadata |
+
+Underneath, `orchestration/executor.py:query_status_for_cluster()` sweeps
+**every enabled executor sharing the cluster's substrate** and merges the
+results. `Executor.status_scope` (default `"host"`) names that substrate:
+executors sharing a scope inspect disjoint state on the same hosts — Docker
+containers versus native pidfiles — so both must be asked. A single failing
+executor is skipped rather than breaking the report.
+
+Telemetry is the second axis, abstracted the same way: one `TelemetryProvider`
+per scope, composed with the occupancy poll by `api.live_monitor` into
+`MonitorFrame` snapshots that drive the `cluster monitor` TUI.
 
 ## Recipe resolution chain
 
-When you run `sparkrun run my-recipe`, recipe resolution follows this search order:
+When you run `sparkrun run my-recipe`, resolution walks these in order:
 
-1. Bundled recipes (shipped with sparkrun)
-2. Local `./recipes/` directory
-3. User config recipes (`~/.config/sparkrun/recipes/`)
-4. Git-cloned registries (`~/.cache/sparkrun/registries/`)
+1. `@spark-arena/<uuid>` shortcut — expands to a Spark Arena URL
+2. A literal HTTP/HTTPS URL — fetched and cached (https-only, host-allowlisted)
+3. `@registry/recipe-name` — scoped lookup, skipping the search chain
+4. An exact or relative file path
+5. The current working directory — `.yaml`/`.yml` files that parse as recipes
+6. Registry search — flat name lookup, then a recursive scan
 
-The `@registry/recipe` syntax skips the search chain and loads directly from a specific registry.
+Two rules govern step 6: **flat beats nested within a registry** (but never
+suppresses another registry's scan), and **`.yaml` beats a same-stem `.yml` in
+the same directory**. So an "ambiguous name" error always means genuinely
+distinct recipes. The same machinery backs benchmark profiles, tuning configs,
+and mods, so listing and lookup can never disagree — see
+`RegistryAsset` / `find_asset_in_registries` / `iter_asset_files`.
+
+The catalog side has a single entry point too: `api.search_recipes()`, which
+`sparkrun list` and `sparkrun search` both render. They differ only in
+`unique_names` — `list` shows one row per unqualified name, `search` shows
+every copy.
 
 ## Registry system internals
 
@@ -87,10 +219,16 @@ The `RegistryManager` tracks recipe collections from remote git repos using spar
 On first run (no `registries.yaml`):
 
 1. `_load_registries()` → no file → `_default_registries()`
-2. Clones each URL in `DEFAULT_REGISTRIES_GIT` and reads its `.sparkrun/registry.yaml` manifest
+2. Clones each URL in `BOOTSTRAP_REGISTRY_URLS` and reads its `.sparkrun/registry.yaml` manifest
 3. Merges manifest entries with `FALLBACK_DEFAULT_REGISTRIES` (manifest entries take priority by name)
 4. Saves combined list to `registries.yaml`
 5. If all manifest URLs fail, pure fallback entries are returned (offline safety net)
+
+`BOOTSTRAP_REGISTRY_URLS` governs *manifest discovery only* — it does not
+control trust. Trust is a per-entry `trusted` field stored locally in the
+user's `registries.yaml`, seeded from `FALLBACK_DEFAULT_REGISTRIES` (every
+built-in default ships trusted) and editable via `sparkrun registry
+trust`/`untrust`. A repository's own manifest cannot grant itself trust.
 
 ### Manifest format
 
@@ -114,12 +252,16 @@ Names starting with reserved prefixes (`sparkrun`, `official`, `arena`, etc.) ca
 
 | Path | Purpose |
 |---|---|
-| `~/.config/sparkrun/config.yaml` | User configuration |
+| `~/.config/sparkrun/config.yaml` | User configuration, including `features:` and `plugins:` |
 | `~/.config/sparkrun/clusters/*.yaml` | Named cluster definitions |
-| `~/.config/sparkrun/registries.yaml` | Custom recipe registry list |
+| `~/.config/sparkrun/registries.yaml` | Recipe registry list, including per-registry trust |
+| `~/.config/sparkrun/proxy.yaml` | Gateway settings and model aliases |
 | `~/.cache/sparkrun/registries/` | Git-cloned recipe registries |
 | `~/.cache/sparkrun/jobs/` | Job metadata (cluster_id → recipe mapping) |
 | `~/.cache/sparkrun/pending/` | PID lock files for in-progress operations |
+| `~/.cache/sparkrun/benchmarks/` | Resumable benchmark run state |
+| `~/.cache/sparkrun/proxy/` | Generated gateway config, process state, logs (`0600`) |
+| `~/.cache/sparkrun/local/` | PID and log files for `local`-executor workloads |
 | `~/.cache/huggingface/` | HuggingFace model cache (mounted into containers) |
 
 ## Orchestration layer
@@ -136,6 +278,16 @@ All remote operations use SSH stdin piping — scripts are generated as Python s
 | `orchestration/networking.py` | ConnectX-7 NIC detection, IP assignment, CX7 configuration |
 | `orchestration/primitives.py` | Higher-level composition: `build_ssh_kwargs()`, `build_volumes()`, `merge_env()` |
 | `orchestration/job_metadata.py` | Persistent job metadata stored in `~/.cache/sparkrun/jobs/` |
+| `orchestration/executor.py` | Public executor facade — `resolve_executor()`, `query_status_for_cluster()` |
+| `orchestration/executors/` | Executor plugins: `docker.py` (default), `local.py` (experimental) |
+| `orchestration/collectives/` | `CollectiveBackend` ABC + `nccl` (default), `rccl`/`hccl` scaffolds |
+| `orchestration/telemetry/` | `TelemetryProvider` per status scope (host metrics for `cluster monitor`) |
+| `orchestration/logs.py` | Where a runtime's logs actually live, per executor |
+| `orchestration/hooks.py` | `pre_exec` / `post_exec` / `post_commands` runners, with trust gating |
+
+SSH fan-out is bounded by `SparkrunConfig.max_parallel_ssh` (config key
+`ssh.max_parallel_ssh`, default 20), and launch-path calls carry execution
+timeouts so one host that connects and then hangs can't stall a batch.
 
 ## Key dependencies
 

@@ -7,40 +7,93 @@ Builders prepare container images before sparkrun distributes them to target hos
 
 Most recipes skip builder work entirely — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling on each host. The `eugr` builder is the main "real" builder, used for the eugr/spark-vllm-docker family of images.
 
+:::note[eugr is pull-first as of July 2026]
+Upstream eugr transitioned from local builds to published, stable container
+images. sparkrun's `eugr` builder mirrors that: **it normally just pulls** the
+relevant image and does no local build at all.
+
+A local build only happens when the recipe's `build_args` explicitly ask for
+one — see [When a build actually happens](#when-a-build-actually-happens). The
+build machinery documented further down still exists and is still correct, but
+it is now the exception rather than the common path.
+:::
+
 ## Built-in builders
 
 | Builder | Description | When used |
 |---|---|---|
 | `docker-pull` | Default. Does nothing — relies on the distribution phase to pull images. | All recipes without an explicit `builder` field. |
-| `eugr` | Builds [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) containers. Clones the repo and runs `build-and-copy.sh` with recipe-specified build args. The builder does **not** handle `mods` — those are resolved and expanded into `pre_exec` entries by Phase 1, builder-agnostic (see [Recipes › Mods](/recipes/format/#mods) for the full mods spec). | Recipes with `builder: eugr`, recipes using `ghcr.io/spark-arena/dgx-vllm-eugr-nightly[-tf5]` images at the `:latest` tag (sentinel images, auto-detected), or recipes with `build_args` (which still trigger this builder). The presence of `mods` alone also triggers it for backward compatibility with the original eugr-centric workflow. |
+| `eugr` | Resolves [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) images. Pulls a prebuilt image by default; runs `build-and-copy.sh` only when `build_args` request a wheels or custom build. The builder does **not** handle `mods` — those are resolved and expanded into `pre_exec` entries by Phase 1, builder-agnostic (see [Recipes › Mods](/recipes/format/#mods) for the full mods spec). | Recipes with `builder: eugr`, recipes using a recognized eugr `:latest` image (sentinel images, auto-detected), or recipes with `build_args`. The presence of `mods` alone also triggers it for backward compatibility with the original eugr-centric workflow. |
+
+## When a build actually happens
+
+sparkrun mirrors `build-and-copy.sh`'s own rule: a build is requested when
+`build_args` contains **any** token that isn't a known pull-compatible no-op.
+
+- **Pull-compatible (no build):** `--tf5`, `--pre-tf`, `--pre-transformers`.
+  These are deprecated no-ops — tf5 and non-tf5 now produce identical images.
+- **Everything else forces a build:** `--use-wheels` (the standard nightly
+  wheels build), plus custom-build flags like `--rebuild-vllm`,
+  `--rebuild-flashinfer`, `--vllm-ref`, `--exp-mxfp4`, `--force-*-download`,
+  `--apply-*-pr`. Flag *values* count too, which is harmless — the flag itself
+  already forced the build.
+
+So an ordinary recipe with no `build_args`, or one carrying only the legacy
+tf5 flags, is always a pull.
 
 ## Sentinel container images
 
-The `eugr` builder treats two image names as **sentinels** for opt-in managed rebuilds:
+The `eugr` builder recognizes four `:latest` image refs as **sentinels**:
 
 - `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest`
 - `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest`
+- the Docker Hub `eugr/spark-vllm` image, in short and fully-qualified form
 
-When a recipe references one of these at the `:latest` tag, sparkrun maps it to a local build target (`sparkrun-eugr-vllm` / `sparkrun-eugr-vllm-tf5`) and rebuilds from the upstream repo + currently-published wheels. Any other tag on these names — or any non-sentinel image — is pulled (or trusted locally) and never silently rebuilt. This keeps "build from upstream" an explicit user intent rather than a side effect of using `:latest`. See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images-for-managed-builds) for the user-facing explanation.
+All four resolve to the same single non-tf5 build. What they resolve *to*
+depends on whether a build was requested:
 
-### Disabling sentinel image handling
+| `build_args` | Sentinel resolves to |
+|---|---|
+| No build requested (the normal case) | The authoritative GHCR nightly, **pulled** |
+| A build requested (`--use-wheels`, custom flags) | A local build target, built from upstream wheels |
 
-The sentinel remap is ON by default. Power users can disable it via the `defaults.builders.eugr.use_sentinel_image` configuration option in `~/.config/sparkrun/config.yaml`:
+A non-sentinel eugr image that isn't pullable is reused when already present
+locally; otherwise sparkrun substitutes its own nightly and pulls, since eugr
+will not build without an explicit flag.
+
+See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images) for the user-facing explanation.
+
+### Forcing a fresh image
+
+`--rebuild` (or `builder_config.rebuild` in a recipe) means "don't reuse what's
+already here":
+
+- On the **pull** path, a registry image can't be rebuilt, so it is re-pulled
+  fresh — bypassing a stale local or head-node copy of the same tag.
+- On the **build** path, it forces a from-scratch build even when a matching
+  image is present and the build cache would otherwise skip it.
+
+### Opting out of pull-first substitution
+
+Pull-first substitution is ON by default. Power users can disable it via
+`defaults.builders.eugr.use_sentinel_image` in `~/.config/sparkrun/config.yaml`:
 
 ```yaml
 defaults:
   builders:
     eugr:
-      use_sentinel_image: false   # treat :latest as a regular pullable image
+      use_sentinel_image: false   # legacy: use images verbatim, build if missing
 ```
 
-With this set to `false`:
+:::caution
+This is the **legacy build escape hatch**, not a "pull instead" switch. With it
+set to `false`, sparkrun stops substituting its own nightly: images are used
+verbatim, and one that isn't present is **built** via `build-and-copy.sh` the
+old way. Leave it at the default unless you specifically want that behavior.
+:::
 
-- `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest` flows through as a normal pullable image — sparkrun pulls the published GHCR image and never invokes the rebuild path.
-- The post-build flashinfer smoke test (which only runs on builds) is also skipped, since no build happens.
-- Recipes that explicitly set `build_args` still trigger the `eugr` builder — the toggle only affects the implicit `:latest` sentinel mapping.
-
-This is the right setting when the upstream `:latest` GHCR image is healthy and the time/bandwidth of a local rebuild is not justified.
+Recipes that set `build_args` request a build regardless of this toggle — it
+only affects the implicit sentinel mapping and the missing-image fallback.
 
 ## Persisting build logs
 
@@ -65,7 +118,9 @@ When `save_build_logs` is `false` (the default) and a build fails, the error mes
 
 ## Build hygiene and observability
 
-The `eugr` builder includes several safety nets that activate when a rebuild does happen:
+Everything below applies only on the build path, which since the July 2026
+pull-first switch is the exception. These are the safety nets that activate
+when a build does happen:
 
 - **`--cleanup` always appended.** sparkrun appends `--cleanup` to every `build-and-copy.sh` invocation so the upstream script starts from a clean `./wheels/` directory and an empty set of `.*-commit` markers each time. This eliminates wheel-state drift across runs (stale commit files, half-restored backups after a failed download, dash-vs-underscore wheel-name collisions). The flag is added to an **effective** copy of `build_args` only — the cache identity stored under `build_args` remains tied to the recipe's canonical args so subsequent runs still hit the build cache.
 - **In-memory log capture (always on).** Combined stdout/stderr from `build-and-copy.sh` is captured in memory so the last ~80 lines plus an inferred phase can be surfaced on failure regardless of verbosity. At `-v` (INFO+) the output also streams to the terminal in real time. Optional **on-disk persistence** is gated by `defaults.builders.eugr.save_build_logs` (default `false`) — see [Persisting build logs](#persisting-build-logs) below.

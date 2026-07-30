@@ -64,10 +64,19 @@ When you launch a multi-node job, sparkrun:
 2. **Configures NCCL environment variables** to use the high-speed network
 3. **Syncs the container image** to all hosts (skipped if already present)
 4. **Syncs the model** to all hosts (uses InfiniBand IPs for fast rsync when available)
-5. **Starts containers on all hosts** — the first host becomes the head node, others are workers
+5. **Starts containers on all placed hosts** — the first host of the placement becomes the head node, the others are workers
 6. **Establishes distributed communication** between nodes (via Ray, native distributed init, or RPC depending on the runtime)
 
-The head node (first host in your cluster) runs the inference API endpoint. Worker nodes participate in tensor-parallel computation but don't serve HTTP traffic.
+The head node runs the inference API endpoint. Worker nodes participate in tensor-parallel computation but don't serve HTTP traffic.
+
+:::note[Which host is the head?]
+The head is the first host of the *scheduled placement*, not automatically the
+first host in your cluster definition. With the default `occupancy-sparse`
+[scheduler](/advanced/schedulers/), placement is chosen from the least-loaded
+hosts, so the head can differ between launches as the cluster fills up. Run
+`sparkrun status` to see which host actually took the head role — its output
+also gives you the ready-to-use `logs` and `stop` commands.
+:::
 
 ## 4. Verify the deployment
 
@@ -95,7 +104,7 @@ sparkrun cluster monitor --simple
 
 ## 6. Test the endpoint
 
-The API is served on the head node (the first host in your cluster):
+The API is served on the head node. `sparkrun status` tells you which host that is:
 
 ```bash
 curl http://<head-node-ip>:8000/v1/models
@@ -117,9 +126,9 @@ If you launched with `--tp 2`, you must also pass `--tp 2` to `stop` and `logs`.
 
 ## Tips
 
-- **Head node selection**: The first host in your cluster definition becomes the head node. If the machine running sparkrun is also a cluster member, put it first (using `127.0.0.1`) for slightly faster operations.
+- **Head node selection**: The head is the first host of the *scheduled placement*, which is not necessarily the first host in your cluster definition — see the note below.
 - **InfiniBand matters**: CX-7 networking provides dramatically faster model syncing and NCCL communication. If multi-node jobs are slow to start or inference latency is high, make sure CX-7 is configured (`sparkrun setup cx7`).
-- **Node trimming**: If your cluster has more hosts than the requested TP level, sparkrun automatically trims to the required node count. A 4-node cluster with `--tp 2` only uses the first 2 hosts.
+- **Node selection**: If your cluster has more hosts than the requested TP level, sparkrun uses only as many as the job needs. Which ones depends on the [scheduler](/advanced/schedulers/): the default `occupancy-sparse` picks the least-loaded hosts, while `greedy` always takes the first N in the definition.
 
 ## Next steps
 

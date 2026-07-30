@@ -30,7 +30,7 @@ Press Ctrl+C after each launch to detach from logs — the models keep serving i
 Launch the proxy gateway. It automatically discovers your running endpoints:
 
 ```bash
-sparkrun proxy start
+sparkrun proxy start --host 127.0.0.1
 ```
 
 You'll see output like:
@@ -41,16 +41,26 @@ Discovered 2 healthy endpoint(s):
   10.24.11.13:8000 — Qwen/Qwen3-1.7B (vllm)
   10.24.11.13:8001 — Qwen/Qwen3.5-0.8B (sglang)
 
-Starting proxy on 0.0.0.0:4000...
-Proxy started. API: http://localhost:4000/v1
+Proxy started on 127.0.0.1:4000. API: http://localhost:4000/v1
 Auto-discover enabled (every 30s)
 ```
 
-If you're using a cluster, pass it to the proxy so it can discover endpoints via SSH:
+If you're using a cluster, pass it to the proxy so it can discover endpoints on
+those hosts:
 
 ```bash
-sparkrun proxy start --cluster mylab
+sparkrun proxy start --cluster mylab --host 127.0.0.1
 ```
+
+:::caution[Why `--host 127.0.0.1`]
+Started with no bind host ever configured, the proxy keeps a legacy `0.0.0.0`
+default and warns loudly: that exposes every discovered inference backend to
+your entire network, unauthenticated unless you also set a master key. Choosing
+a bind address explicitly silences the warning and is persisted to
+`proxy.yaml`, so you only pass it once.
+
+To share the endpoint deliberately, set `--master-key <secret>` as well.
+:::
 
 ## 3. Check available models
 

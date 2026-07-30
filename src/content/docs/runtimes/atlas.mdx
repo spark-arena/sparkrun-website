@@ -13,9 +13,16 @@ description: Using Atlas (pure-Rust LLM inference server) on DGX Spark.
 - Optional speculative decoding (`--speculative`, `--ngram-speculative`, `--self-speculative`), DFlash attention, and prefix caching
 - `--high-speed-swap` path that uses `io_uring` for fast KV/cache spill (containers run with `seccomp=unconfined` and `IPC_LOCK`/`SYS_NICE` capabilities)
 
-:::caution
-Atlas is currently restricted to single-node deployments (`tensor_parallel: 1`, `ep_size: 1`) in sparkrun. Multi-node tensor and expert parallelism support is coming in a near-term release.
-:::
+Atlas derives its world size from the two parallelism dimensions, so you set
+`tensor_parallel` and `ep_size` and sparkrun maps the resulting ranks onto
+physical hosts:
+
+- `world_size == tensor_parallel × ep_size` — orthogonal mesh
+- `world_size == tensor_parallel == ep_size` — overlapping groups
+
+Atlas requires a GB10 host: the runtime declares a `gb10` capability
+requirement, and a launch placed on a host without it fails the compatibility
+check before any side effects.
 
 ## Official recipe registry
 

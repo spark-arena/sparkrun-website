@@ -110,6 +110,8 @@ Which inference engine to use:
 | `sglang` | SGLang | Native | First-class. Solo and multi-node. |
 | `llama-cpp` | llama.cpp | N/A | Solo mode. GGUF models. |
 | `trtllm` | TensorRT-LLM | MPI | NVIDIA TensorRT-LLM with MPI-based multi-node orchestration. |
+| `atlas` | [Atlas](https://atlasinference.io/) | Native | Pure-Rust engine with its own NCCL distribution. Composes tensor and expert parallelism (`tensor_parallel`, `ep_size`). Requires a GB10 host. See [Atlas runtime](/runtimes/atlas/). |
+| `modular-max` | [Modular MAX](https://www.modular.com/max) | N/A | Single-node only. `tensor_parallel` maps to local `--devices`, not to host count. |
 
 Explicitly setting `runtime` is **recommended** for clarity and forward-compatibility. However, this field is technically optional — when omitted, sparkrun uses [automatic runtime detection](#automatic-runtime-detection) to infer the runtime from the `command` field. If neither `runtime` nor a recognizable command is present, the recipe defaults to `vllm` behavior.
 
@@ -175,6 +177,85 @@ solo_only: true     # equivalent to max_nodes: 1, mode: solo
 cluster_only: true  # equivalent to min_nodes: 2, mode: cluster
 ```
 
+### `scheduler`
+
+Names the placement scheduler for this recipe (`occupancy-sparse`,
+`occupancy-dense`, or `greedy`). Sits below the `--scheduler` CLI flag and
+above the cluster's setting.
+
+## Executor fields
+
+### `executor`
+
+Which backend launches the workload — `docker` (default) or `local`.
+
+```yaml
+executor: local
+```
+
+### `executor_config`
+
+Per-executor knobs. Docker accepts container-level settings; the experimental
+executors take their own:
+
+```yaml
+executor: local
+executor_config:
+  working_dir: /opt/qwen3
+  log_dir: /var/log/sparkrun
+  env_file: /etc/sparkrun.env
+  command_prefix: nice -n 10
+```
+
+See [Executors](/advanced/executors/) for the field reference and the
+resolution chain. The experimental executors are off by default and must be
+enabled via a [feature flag](/advanced/feature-flags/).
+
+## Lifecycle hooks
+
+A recipe can run shell commands around the serve command. Execution order:
+
+```
+1. builder.prepare_image()   — build/pull the container image
+2. Distribution              — sync image + model to hosts
+3. Container launch
+4. pre_exec                  — inside ALL containers, before serve
+5. Serve command
+6. [wait for healthy]        — port + HTTP check (only when post hooks exist)
+7. post_exec                 — inside the HEAD container only
+8. post_commands             — on the CONTROL MACHINE
+9. [stop_after_post]         — optional auto-stop
+```
+
+| Hook | Runs |
+|---|---|
+| `pre_exec` | Inside every container, before serve. Sequential, fail-fast. |
+| `post_exec` | Inside the head container, after the endpoint is healthy. |
+| `post_commands` | On your control machine, after `post_exec`. |
+| `stop_after_post` | When true, stops the workload once post hooks finish. |
+
+```yaml
+pre_exec:
+  - pip install --no-cache-dir some-plugin
+
+post_exec:
+  - curl -s localhost:8000/v1/models
+
+post_commands:
+  - echo "endpoint ready on {head_host}:{port}"
+```
+
+:::danger[Hooks execute arbitrary commands]
+`post_commands` runs on **your machine**, not in a container. sparkrun gates
+hooks behind a trust decision: recipes loaded from a local path and recipes
+from the default registries run without prompting; anything else prompts unless
+you pass `--trust`.
+
+Recipes fetched from a URL — including `@spark-arena/<id>` links — are **never**
+auto-trusted. Read [Security & Trust](/advanced/security/) before running a
+recipe you did not write.
+:::
+
 ## Configuration fields
 
 ### `defaults`
@@ -217,10 +298,24 @@ Environment variables injected into the container.
 ```yaml
 env:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-  HF_TOKEN: "${HF_TOKEN}"
 ```
 
-Shell variable references (`${VAR}`) are expanded from the **control machine's** environment when the recipe is loaded — forward secrets without hardcoding them.
+Values are passed through **literally**.
+
+:::caution[Changed in 0.3.0]
+Recipe `env` values are no longer expanded against the control machine's
+environment. A `${HF_TOKEN}` in a recipe is now delivered to the container as
+the literal string `${HF_TOKEN}`, not your token.
+
+This closed an exfiltration path: a third-party recipe could previously write
+`env: {LEAK: "${AWS_SECRET_ACCESS_KEY}"}` and have the control machine's
+secrets substituted into a container it controlled.
+
+To forward a secret, set it in the environment the *runtime* reads, or use a
+cluster-level env reference (see
+[Managing Clusters](/clusters/managing/)) which resolves from a file at launch
+time and keeps secrets out of recipe YAML.
+:::
 
 ## Metadata fields
 
@@ -365,8 +460,10 @@ While explicitly setting `runtime` is recommended, sparkrun can infer the runtim
 | `python -m sglang.launch_server ...` | `sglang` |
 | `python3 -m sglang.launch_server ...` | `sglang` |
 | `llama-server ...` | `llama-cpp` |
+| `trtllm-serve ...` | `trtllm` |
+| `mpirun ... trtllm ...` | `trtllm` |
 
-If the command doesn't match any of these patterns, the recipe falls through to `vllm` behavior by default.
+If the command doesn't match any of these patterns, the recipe falls through to `vllm` behavior by default. Runtimes without a command-hint pattern — `atlas`, `modular-max` — must be named explicitly via the `runtime` field.
 
 An explicit `runtime` field **always wins** — command-hint detection only fires when `runtime` is omitted. Existing recipes that set `runtime` continue to work identically.
 

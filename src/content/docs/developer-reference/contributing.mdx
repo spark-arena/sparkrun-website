@@ -6,13 +6,13 @@ description: Development setup, testing, and contribution guidelines for sparkru
 ## Quick start
 
 ```bash
-git clone https://github.com/spark-arena/sparkrun.git -b develop
+git clone https://github.com/spark-arena/sparkrun.git -b develop-next
 cd sparkrun
 source dev.sh
 sparkrun --help
 ```
 
-`source dev.sh` creates a `.venv`, installs sparkrun in editable mode with dev dependencies, and activates the venv in your current shell. After sourcing, `sparkrun` in that shell runs the code from your checkout — edits take effect immediately.
+`source dev.sh` uses `uv sync` to manage the `.venv` and install sparkrun with dev dependencies, then installs the pre-commit hooks. After sourcing, the venv is activated in your current shell and `sparkrun` runs the code from your checkout — edits take effect immediately.
 
 Requires [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
@@ -21,10 +21,12 @@ Requires [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/inst
 | Branch | Purpose |
 |---|---|
 | `main` | Stable releases. Protected — no direct pushes |
-| `develop` | Integration branch. **PRs target here** |
-| `feature/*` | Feature branches off `develop` |
+| `develop` | Release staging; the source of the `beta` [update channel](/getting-started/updates/) |
+| `develop-next` | Active integration; the source of the `alpha` channel. **PRs target here** |
+| `feature/*` | Feature branches off `develop-next` |
 
-**All PRs should target `develop`**, not `main`. Releases are merged from `develop` → `main`.
+**All PRs should target `develop-next`**, not `develop` or `main`. Changes flow
+`feature/*` → `develop-next` → `develop` → `main`.
 
 ## Running tests
 
@@ -59,31 +61,41 @@ Configuration: line-length 140, target Python 3.12 (in `pyproject.toml`).
 
 ```
 src/sparkrun/
-├── cli/              # Click CLI (one module per command group)
-├── core/             # Config, recipe, registry, launcher, cluster manager
-├── runtimes/         # Runtime plugins (vllm, sglang, llama-cpp, trtllm)
-├── orchestration/    # SSH, Docker, executor, InfiniBand, scripts
+├── cli/              # Click CLI (one module per command group) — renders api/
+├── api/              # Console-free public library API
+├── core/             # Config, recipe, registry, launcher, scheduler, features
+├── runtimes/         # Runtime plugins (vllm, sglang, llama-cpp, trtllm, …)
+├── orchestration/    # SSH, Docker, executors, collectives, InfiniBand, scripts
+├── transports/       # Cluster connectivity seam
+├── schedulers/       # Placement schedulers
+├── platforms/        # Hardware platform registry
 ├── builders/         # Builder plugins (eugr, docker-pull)
 ├── models/           # HuggingFace download, distribution, VRAM estimation
 ├── containers/       # Container image distribution
 ├── tuning/           # Triton kernel tuning (SGLang, vLLM)
 ├── benchmarking/     # Benchmark framework plugins
 ├── diagnostics/      # Host and run diagnostic collection (NDJSON)
-├── proxy/            # LiteLLM-based inference proxy gateway
+├── proxy/            # Inference gateway
+├── telemetry/        # Anonymous usage telemetry
 ├── utils/            # Shared helpers
 └── scripts/          # Embedded bash scripts (*.sh)
 tests/                # pytest tests (mirrors src/ structure)
 ```
 
+New logic belongs in `api/` with the CLI rendering it — `api/` must never import `sparkrun.cli`.
+
 ## Key patterns
 
 ### Plugin system (SAF)
 
-Runtimes, builders, and benchmarking frameworks are SAF multi-extension plugins discovered via Python entry points in `pyproject.toml`. Bootstrap flow:
+Runtimes, builders, benchmarking frameworks, executors, schedulers, transports, and telemetry providers are SAF multi-extension plugins. Each is discovered by scanning its module for subclasses of a base class:
 
 ```
 cli/__init__.py → core/bootstrap.py → SAF init → find_types_in_modules() → register_plugin()
+                                                → load_external_plugins()
 ```
+
+A plugin can gate itself behind a [feature flag](/advanced/feature-flags/) by declaring `required_feature_flag`. See [Architecture](/developer-reference/architecture/#plugin-system-saf) for the full extension-point table.
 
 ### Config chain (vpd)
 
@@ -99,7 +111,7 @@ Priority: CLI → recipe → runtime defaults. The same pattern is used for exec
 
 ### Executor abstraction
 
-Container engine operations go through the `Executor` ABC (`orchestration/executor.py`). `DockerExecutor` is the current implementation. Runtimes use `self.executor.*` instead of importing `docker.py` directly:
+Container engine operations go through the `Executor` ABC (`orchestration/executor.py`). `DockerExecutor` is the default and production-supported implementation. Runtimes use `self.executor.*` instead of importing `docker.py` directly:
 
 ```python
 # In a runtime:
@@ -110,7 +122,7 @@ self.executor.container_name(cluster_id, "solo")
 self.executor.node_container_name(cluster_id, rank)
 ```
 
-`ExecutorConfig` is built from a vpd chain (CLI flags → recipe `executor_config` → `EXECUTOR_DEFAULTS`) in `launcher.py` and passed to the executor.
+Runtimes never construct an executor directly — `RuntimePlugin._resolve_executor()` delegates to `orchestration.executor:resolve_executor()`, the single sanctioned entry point for the layered resolution chain. An explicitly-requested executor that is unknown or gated off raises `ExecutorUnavailableError` rather than falling back to Docker. See [Executors](/advanced/executors/).
 
 ### SSH execution model
 
@@ -170,7 +182,7 @@ python scripts/update-versions.py --check
 
 ## PR guidelines
 
-- **Target `develop`** branch for all PRs
+- **Target `develop-next`** branch for all PRs
 - Keep commits atomic — one logical change per commit
 - Run `pytest` and `ruff check` before pushing
 - Use `--dry-run` to verify CLI changes produce correct Docker commands

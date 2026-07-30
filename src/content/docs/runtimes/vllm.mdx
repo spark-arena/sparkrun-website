@@ -28,16 +28,23 @@ Both `vllm-distributed` and `vllm-ray` use the same container images. sparkrun w
 
 We recommend that you use the Spark Arena images for sparkrun recipes; when you use the official Spark Arena images, sparkrun will automatically manage using the latest eugr/spark-vllm-docker.
 
-### Sentinel images for managed builds
+### Sentinel images
 
-The two Spark Arena nightly image names — `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest` and `ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest` — are **sentinel images**. They resolve to real container images, but when you pair them with the `:latest` tag, sparkrun's `eugr` builder treats them as an explicit user opt-in to **managed rebuilds**: it will clone the upstream [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) repo and build a fresh image from the current state of that repo (and current available wheels) before each launch.
+The Spark Arena nightly image names — `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest`, its `-tf5` variant, and the Docker Hub `eugr/spark-vllm` image — are **sentinel images**. When you reference one at `:latest`, sparkrun's `eugr` builder resolves it to the authoritative published nightly and **pulls** it.
 
-This is the **default for all official v2 recipes** because it gives users a stable, single name to reference while sparkrun handles versioning. To opt out:
+This is the **default for all official v2 recipes**: it gives you a stable, single name to reference while sparkrun handles versioning. The `-tf5` and non-tf5 nightlies are identical now, so both resolve the same way.
 
-- Use any **non-`:latest` tag** (e.g. `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:2026-03-01`) — sparkrun will pull that immutable tag and never rebuild.
-- Use a **non-sentinel image name** (any image not under `ghcr.io/spark-arena/dgx-vllm-eugr-nightly*`) — sparkrun will pull (or rely on the local copy) and never rebuild, even at `:latest`.
+:::note[Changed in July 2026]
+Upstream eugr moved to publishing stable container images rather than expecting
+local builds, and sparkrun followed. Referencing a sentinel at `:latest` used
+to trigger a **rebuild from the upstream repo** before each launch; it now
+pulls a prebuilt image.
 
-The sentinel design is intentional: using a local image often implies the user manages versioning outside sparkrun, so sparkrun never silently forces a rebuild of an arbitrary `:latest` image. Sentinels make the "rebuild from upstream" intent explicit.
+To build locally from upstream wheels instead, opt in explicitly with
+`build_args: ["--use-wheels"]` in the recipe.
+:::
+
+To pin a specific image rather than tracking the nightly, use any non-`:latest` tag (e.g. `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:2026-03-01`) — sparkrun pulls that immutable tag as-is.
 
 See [Phase 2: Building image](/developer-reference/execution-flow/#phase-2-building-image) for the full builder lifecycle.
 

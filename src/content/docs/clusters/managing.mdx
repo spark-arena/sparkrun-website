@@ -19,6 +19,46 @@ sparkrun cluster show mylab
 
 Displays the cluster's hosts, description, SSH user, and default status.
 
+## Inspect effective configuration
+
+```bash
+sparkrun cluster inspect mylab
+```
+
+Shows the *resolved* settings — transfer mode, transfer interface, topology,
+SSH user, cache directories — and checks whether those cache directories exist
+on each host. The fastest way to diagnose a transfer or permission problem
+without launching a job.
+
+## Cluster-level environment
+
+A cluster can carry container environment variables that apply to every
+workload launched on it. They sit **below** recipe `env` and CLI overrides in
+precedence: CLI > recipe `env` > cluster `env`.
+
+```yaml
+# ~/.config/sparkrun/clusters/mylab.yaml
+env:
+  HF_TOKEN: "${HF_TOKEN}"
+env_file: /home/me/.sparkrun.env
+```
+
+`${VAR}` references resolve at launch time from `env_file` — read locally on
+the control machine and emitted per host, so the file never has to exist on the
+cluster nodes. Secrets therefore stay in your env file and never land in the
+cluster YAML.
+
+:::note
+References resolve **only** against `env_file` — never against `os.environ` or
+recipe env — so this cannot be used to pull arbitrary host secrets into a
+container. A reference with no matching key, or with no `env_file` configured,
+is an error rather than an empty string.
+:::
+
+This block is typically populated by `sparkrun cluster import`, which maps a
+legacy `CONTAINER_*` block into it. Import owns the block and rewrites it
+wholesale on re-sync.
+
 ## Delete a cluster
 
 ```bash

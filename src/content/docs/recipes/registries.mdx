@@ -206,6 +206,62 @@ registries:
 
 sparkrun uses a sparse checkout, so only the declared subdirectories are fetched — the rest of the repo is not downloaded.
 
+### Trust model
+
+Recipes can declare shell commands that run before, after, or alongside the
+serve workload: `pre_exec` (inside the container), `post_exec` (inside the
+container after a health check), and `post_commands` (on the **control
+machine**). To prevent a third-party registry from silently running arbitrary
+commands, sparkrun gates these hooks with a per-recipe trust flag.
+
+A recipe is **trusted** (hooks run without prompting) when:
+
+- the user passed `--trust` on the CLI;
+- the recipe was loaded from a local path (no `source_registry`);
+- the recipe came from a registry marked `trusted: true` in your
+  `registries.yaml` — every registry sparkrun ships by default is first-party
+  and ships trusted; or
+- you marked its registry trusted explicitly (below).
+
+A registry you add yourself is untrusted until you say otherwise.
+
+Otherwise sparkrun prompts before each hook surface runs. Use `--trust` only
+when you've reviewed the recipe and intend to run its hook content.
+
+:::danger[URL recipes are never auto-trusted]
+A recipe fetched from a URL — including `@spark-arena/<id>` links — always
+requires confirmation or `--trust`, regardless of any other setting. Before
+0.3.0 these carried no source registry and were treated as local, so their
+hooks ran with no prompt: a "run this link" code-execution path. Fetching is
+now further restricted to `https://` with a host allowlist, redirect
+re-validation, and a response size cap.
+:::
+
+#### Trusting a registry
+
+If you operate a registry yourself and don't want a prompt on every run, mark
+it trusted once:
+
+```bash
+sparkrun registry trust my-team
+sparkrun registry untrust my-team    # revoke
+
+# or trust at the point of adding
+sparkrun registry add https://github.com/myorg/spark-recipes.git --trust
+```
+
+This makes every recipe from that registry auto-run its hooks. Only do it for
+registries whose contents you control or review.
+
+:::caution[What trust does NOT cover]
+Trust gates `pre_exec` / `post_exec` / `post_commands` shell content, but
+**not** recipe-driven privileged container fields (`cap_add`, `devices`,
+`security_opt`, `privileged`, ...). Adding
+a third-party registry implies trusting its recipes' privileged fields.
+:::
+
+See [Security model](/advanced/security/) for the full picture.
+
 ### Reserved name prefixes
 
 Certain name prefixes (`sparkrun`, `official`, `arena`, `spark-arena`, etc.) are reserved for repositories hosted under approved GitHub organizations. If you use a reserved prefix from an unauthorized URL, `sparkrun registry add` will reject it.
@@ -234,5 +290,22 @@ sparkrun run @my-team/my-model-vllm -H 192.168.11.13
 4. **Exact/relative file path** — if the argument is a path to an existing file
 5. **Current working directory** — sparkrun scans `.yaml`/`.yml` files in the CWD that are valid recipes
 6. **Registry search** — flat name lookup in configured registries, then recursive glob
+
+### Resolution rules
+
+Two rules govern step 6, and both exist to make ambiguity mean something real:
+
+- **Flat beats nested, per registry.** A flat `<recipes>/<name>.yaml` wins and
+  suppresses *that registry's* recursive scan — but never another registry's.
+- **`.yaml` beats a same-stem `.yml`, in the same directory.** They are one
+  recipe spelled two ways. The same stem in *different* subdirectories stays
+  two distinct recipes.
+
+So when sparkrun reports an ambiguous name, there genuinely are several
+recipes. The error lists them path-qualified; pick one with the
+`@registry/<relpath>` form.
+
+The same rules apply to benchmark profiles, tuning configs, and mods, so
+listing and lookup can never disagree.
 
 Filenames are matched with or without `.yaml`/`.yml` extensions.

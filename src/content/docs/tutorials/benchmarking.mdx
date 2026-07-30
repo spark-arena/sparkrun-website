@@ -1,9 +1,9 @@
 ---
 title: Benchmarking Models
-description: Benchmark inference performance with sparkrun's built-in benchmarking framework.
+description: Benchmark inference performance, tool-calling correctness, and more with sparkrun's per-category benchmarking framework.
 ---
 
-This tutorial walks you through benchmarking inference workloads using sparkrun's integrated benchmarking system, powered by [llama-benchy](https://github.com/eugr/llama-benchy).
+This tutorial walks you through benchmarking inference workloads using sparkrun's integrated benchmarking system. Performance benchmarks are powered by [llama-benchy](https://github.com/eugr/llama-benchy); tool-calling correctness is powered by [tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench). New benchmark categories appear automatically as plugins register them.
 
 The `sparkrun benchmark` command automates the full benchmarking flow:
 
@@ -28,30 +28,49 @@ To see what a profile includes:
 sparkrun registry show-benchmark-profile spark-arena-v1
 ```
 
-## 2. Run a benchmark
+## 2. Pick a benchmark category
+
+sparkrun groups benchmarks by **category** — the kind of question being asked about a deployment:
+
+| Category | Subcommand | Default framework | Measures |
+|---|---|---|---|
+| performance | `sparkrun benchmark performance` (alias `perf`) | `llama-benchy` | Throughput, latency, TTFT, token-rate |
+| tools | `sparkrun benchmark tools` | `tool-eval-bench` | Tool-call correctness across a fixed scenario suite |
 
 The simplest benchmark uses a recipe and lets sparkrun handle everything:
 
 ```bash
-sparkrun benchmark qwen3-1.7b-sglang --solo
+sparkrun benchmark perf qwen3-1.7b-sglang --solo
 ```
 
-This launches the model, runs the default benchmark, saves results, and stops the model.
+This launches the model, runs the default performance benchmark, saves results, and stops the model.
+
+Bare `sparkrun benchmark <recipe>` (without a category) is preserved and routes to `performance`, so existing scripts keep working unchanged.
 
 To use a specific benchmark profile:
 
 ```bash
-sparkrun benchmark qwen3-1.7b-sglang --profile spark-arena-v1
+sparkrun benchmark perf qwen3-1.7b-sglang --profile spark-arena-v1
 ```
 
 For multi-node benchmarks, add `--tp`:
 
 ```bash
-sparkrun benchmark qwen3-1.7b-sglang --tp 2 --profile spark-arena-v1
+sparkrun benchmark perf qwen3-1.7b-sglang --tp 2 --profile spark-arena-v1
+```
+
+To run a tool-calling correctness benchmark instead:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang --solo
 ```
 
 :::note
 The `--solo` flag forces single-node mode, which is useful when benchmarking on a single host without a cluster configured.
+:::
+
+:::tip[Picking a framework explicitly]
+Each category resolves a default framework. Pass `--framework <name>` to pin a specific plugin. Passing a framework that doesn't belong to the selected category fails fast with `FrameworkCategoryMismatch` — no surprise mid-run.
 :::
 
 ## 3. Output formats
@@ -149,29 +168,77 @@ sparkrun benchmark qwen3-1.7b-sglang --solo \
 
 Long benchmark sweeps (a profile with many `pp` × `tg` × `depth` × `concurrency` combinations) can take hours. sparkrun checkpoints progress after every task, so an interrupted sweep — Ctrl+C, OOM, transient SSH hiccup, anything — picks up exactly where it left off on the next invocation.
 
-Just re-run the same command:
+Re-run the same command and sparkrun prompts to confirm resume:
 
 ```bash
 # First attempt — interrupted partway through
-sparkrun benchmark qwen3-1.7b-sglang --profile spark-arena-v1 --solo
+sparkrun benchmark perf qwen3-1.7b-sglang --profile spark-arena-v1 --solo
 
-# Re-run the same command — sparkrun skips completed tasks and resumes
-sparkrun benchmark qwen3-1.7b-sglang --profile spark-arena-v1 --solo
+# Re-run — interactive prompt confirms resume (defaults to yes)
+sparkrun benchmark perf qwen3-1.7b-sglang --profile spark-arena-v1 --solo
 ```
+
+For automation (CI, agents, scripts) use `--resume` to skip the prompt:
+
+```bash
+# Non-interactive: resume if state exists, fresh otherwise
+sparkrun benchmark perf qwen3-1.7b-sglang --profile spark-arena-v1 --solo --resume
+```
+
+`--resume` and `--fresh` are mutually exclusive. `--fresh` deletes prior state and starts over. With neither flag, non-TTY invocations (CI, piped stdin) default to resume; TTY invocations prompt.
 
 By default, `--exit-on-first-fail` halts the sweep on the first failing task so the issue can be fixed before more compute is spent. Pass `--no-exit-on-first-fail` to keep going through the remaining tasks instead.
 
-To keep results comparable across long, possibly-resumed sweeps, sparkrun **pins the benchmarking framework version** (e.g. the `llama-benchy` release) on the first task and reuses that exact version for every subsequent task in the same run — even if a newer release ships mid-sweep. The pinned version is recorded in the output metadata.
+To keep results comparable across long, possibly-resumed sweeps, sparkrun pins two things on the first successful launch:
 
-State files live under `~/.cache/sparkrun/benchmarks/`. See the [benchmark CLI reference](/cli/benchmark/#scheduling-and-resumability) for the full details.
+- **Framework version** — e.g. the `llama-benchy` release used. Subsequent tasks use the same version even if a newer release ships mid-sweep.
+- **Container image SHA** — the content-addressable image ID resolved from a target host. On resume the launch is overridden to that exact SHA, so a re-pushed tag or rebuilt local image cannot silently change the bits under test between sessions.
+
+Both values are recorded in the output metadata.
+
+State files live under `~/.cache/sparkrun/benchmarks/<benchmark_id>/`.
 
 ## 9. Preview before running
 
 Use `--dry-run` to see what sparkrun would do without executing anything:
 
 ```bash
-sparkrun benchmark qwen3-1.7b-sglang --solo --profile spark-arena-v1 --dry-run
+sparkrun benchmark perf qwen3-1.7b-sglang --solo --profile spark-arena-v1 --dry-run
 ```
+
+## 10. Submit to Spark Arena
+
+Add `--arena` to any `perf` invocation to run the opinionated Spark Arena profile (`@official/spark-arena-v2`) and upload results to the leaderboard:
+
+```bash
+sparkrun benchmark perf qwen3-1.7b-sglang --solo --arena
+```
+
+The legacy `sparkrun arena benchmark <recipe>` continues to work as an alias and uses the same underlying flow (auth check, hardcoded profile, upload). See the [Spark Arena tutorial](/tutorials/spark-arena/) for the full submission walkthrough.
+
+## 11. Using the Python API
+
+Everything in this tutorial is also available as a typed Python API for automation:
+
+```python
+from sparkrun.api import benchmark, BenchmarkOptions, ResumeMode
+
+result = benchmark(BenchmarkOptions(
+    recipe="qwen3-1.7b-sglang",
+    category="performance",                      # or "tools", "perf" alias accepted in CLI only
+    profile="spark-arena-v1",
+    solo=True,
+    bench_args={"pp": [2048], "tg": [128]},      # equivalent to -b pp=2048 -b tg=128
+    resume=ResumeMode.IF_EXISTS,                  # or AUTO / FRESH / REQUIRED
+    arena=False,                                  # set True for arena submission flow
+))
+
+print(result.success, result.benchmark_id)
+print(result.container_image_sha)                 # pinned digest used at launch
+print(result.outputs["yaml"])                     # path to exported result yaml
+```
+
+The API never writes to stdout or calls `sys.exit`; failures raise typed exceptions (`BenchmarkFailed`, `NoResumableState`, `FrameworkCategoryMismatch`, etc.).
 
 ## Next steps
 
