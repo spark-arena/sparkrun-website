@@ -185,7 +185,8 @@ You must reconnect the SSH session after changing groups (or log out and back in
 
 - Containers start but the workload sees no GPU
 - Docker errors referring to `nvidia.com/gpu` or a CDI device that cannot be resolved
-- `sparkrun setup check` reports **FAIL** on `NVIDIA CDI spec (/etc/cdi/nvidia.yaml)` with `/etc/cdi/nvidia.yaml missing or empty`
+- `sparkrun setup check` reports **FAIL** on `NVIDIA CDI spec (/etc/cdi/nvidia.yaml)` with `/etc/cdi/nvidia.yaml missing or empty`, or **WARN** with `N of M referenced paths missing — spec looks stale`
+- A failed launch prints the fix directly: sparkrun recognizes CDI-shaped Docker errors and appends the command to run
 
 Since 0.3.0 sparkrun requests GPUs through **CDI**, emitting `--device nvidia.com/gpu=all` rather than `--gpus`, so a host without a generated CDI spec cannot hand a GPU to the container. CDI is the portable path: it also works on hosts whose Docker rejects `--gpus` outright. It requires **Docker 25 or newer** — on an older daemon the flag is not understood, which produces the same "no GPU" symptom for a different reason.
 
@@ -216,7 +217,9 @@ nvidia-ctk cdi list          # expect nvidia.com/gpu=... entries
 :::
 
 :::caution[Regenerate after a driver upgrade]
-The spec records driver library and device paths as they were when it was generated. After an NVIDIA driver or firmware update those paths can move, leaving a stale spec that resolves to nothing. Re-run the same command to refresh it.
+The spec records driver library and device paths as they were when it was generated. After an NVIDIA driver or firmware update those paths can move, leaving a stale spec that resolves to nothing.
+
+`sparkrun setup check` detects this: it counts how many paths the spec references that no longer exist on the host and reports a **WARN** when any are missing. Re-run the generate command to refresh it.
 :::
 
 ## Container launch failures
