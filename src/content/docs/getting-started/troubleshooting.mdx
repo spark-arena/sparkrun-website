@@ -179,6 +179,46 @@ sudo usermod -aG docker $USER
 
 You must reconnect the SSH session after changing groups (or log out and back in on the host). sparkrun's SSH mesh doesn't pick up group changes from existing connections.
 
+## GPU not visible in containers (missing CDI spec)
+
+**Symptoms:**
+
+- Containers start but the workload sees no GPU
+- Docker errors referring to `nvidia.com/gpu` or a CDI device that cannot be resolved
+- `sparkrun setup check` reports **FAIL** on `NVIDIA CDI spec (/etc/cdi/nvidia.yaml)` with `/etc/cdi/nvidia.yaml missing or empty`
+
+Since 0.3.0 sparkrun requests GPUs through **CDI**, emitting `--device nvidia.com/gpu=all` rather than `--gpus`, so a host without a generated CDI spec cannot hand a GPU to the container. CDI is the portable path: it also works on hosts whose Docker rejects `--gpus` outright. It requires **Docker 25 or newer** — on an older daemon the flag is not understood, which produces the same "no GPU" symptom for a different reason.
+
+**Check first:**
+
+```bash
+sparkrun setup check --cluster mylab
+```
+
+This probes every host without changing anything and tells you which ones are missing the spec.
+
+**Fix** — on each affected host:
+
+```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+```
+
+Verify the devices are now registered:
+
+```bash
+nvidia-ctk cdi list          # expect nvidia.com/gpu=... entries
+```
+
+`sparkrun setup wizard` performs this as its **NVIDIA CDI** step, so a host set up through the wizard already has it. Run the command manually when you added a host later, or provisioned one outside the wizard.
+
+:::note[Prerequisite]
+`nvidia-ctk` ships with the **NVIDIA Container Toolkit**. If it isn't installed, `sparkrun setup check` reports the CDI item as `SKIP — requires nvidia-ctk` and fails the `NVIDIA Container Toolkit` check above it; install the toolkit first, then generate the spec.
+:::
+
+:::caution[Regenerate after a driver upgrade]
+The spec records driver library and device paths as they were when it was generated. After an NVIDIA driver or firmware update those paths can move, leaving a stale spec that resolves to nothing. Re-run the same command to refresh it.
+:::
+
 ## Container launch failures
 
 **Symptoms:**
