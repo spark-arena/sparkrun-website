@@ -124,10 +124,3 @@ where model detection was skipped all yield `<unknown-visibility>` rather than
 the name — being unable to check is never treated as permission to send.
 
 Local paths are classified without contacting the Hub at all.
-
-:::note
-This costs no extra network round-trip on a normal run: sparkrun already
-resolves model metadata from the Hub while estimating VRAM for placement. And
-if you have opted out of telemetry, the visibility lookup is skipped
-entirely — you never pay for a request that exists only to serve telemetry.
-:::
