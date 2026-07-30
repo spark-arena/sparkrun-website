@@ -1,0 +1,79 @@
+---
+title: External Plugins
+description: Loading out-of-tree runtimes, executors, and transports.
+---
+
+sparkrun's extension points — runtimes, builders, benchmarking frameworks,
+executors, schedulers, transports — are discovered from the installed package.
+Out-of-tree plugins let you add your own without forking sparkrun or shipping
+them to PyPI.
+
+:::caution[Off by default, and trusted when on]
+Loading external plugins executes user-supplied Python at startup, so it is
+gated behind the `core.external_plugins` [feature flag](/advanced/feature-flags/)
+and off on every channel. When enabled, plugin directories are **trusted by
+definition** — the same model as a pip-installed package. Only point it at
+code you control.
+:::
+
+## Enabling
+
+```bash
+sparkrun setup features enable core.external_plugins
+```
+
+Then list the directories to load in `~/.config/sparkrun/config.yaml`:
+
+```yaml
+plugins:
+  paths:
+    - ~/src/my-sparkrun-plugins
+```
+
+With the flag off, sparkrun does not even read `plugins.paths`.
+
+## What gets loaded
+
+Each configured directory is prepended to `sys.path`. Every importable
+top-level module or package inside it is imported, then:
+
+1. Scanned for subclasses of the sparkrun plugin base types — `RuntimePlugin`,
+   `BuilderPlugin`, `BenchmarkingPlugin`, `Executor`, `Scheduler`,
+   `Transport` — which are registered automatically.
+2. Given the chance to self-register anything else via an optional
+   module-level `register(v)` hook. This is the escape hatch for registries
+   that aren't subclass-discovered, such as hardware platforms.
+
+A plugin that fails to import is logged and skipped — a broken plugin never
+breaks startup.
+
+## Adding CLI commands
+
+A plugin can attach its own Click commands to the sparkrun command tree:
+
+```python
+from sparkrun.cli.ext import register_cli_command
+
+register_cli_command(my_command, parent=("cluster", "import"))
+```
+
+`parent=()` attaches at the top level. Attachment is idempotent and never
+replaces a built-in command, so plugin commands appear in `--help` and dispatch
+like native ones.
+
+## Gating your own plugin
+
+Plugins can declare a feature flag and register it, so users opt in explicitly:
+
+```python
+class MyExecutor(Executor):
+    executor_name = "mine"
+    required_feature_flag = "executor.mine"
+```
+
+A gated plugin stays registered but is invisible to resolution and
+tab-completion until its flag is enabled.
+
+Commands and backends contributed by a plugin are not part of a stock sparkrun
+install, so they are not documented here — consult the plugin's own
+documentation.

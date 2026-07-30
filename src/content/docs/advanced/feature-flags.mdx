@@ -1,0 +1,100 @@
+---
+title: Feature Flags
+description: Enabling experimental sparkrun capabilities per release channel.
+---
+
+Experimental capabilities ship behind named **feature flags** rather than as
+hidden branches. A flag's default can vary per release channel, so an
+experiment can be on for `alpha` users while staying off for `stable` — no code
+change per release.
+
+Every flag currently shipped is **off on every channel** unless the table below
+says otherwise, so a stock install behaves exactly as if the experiments
+weren't there.
+
+## Managing flags
+
+```bash
+# What exists, what's on, and why
+sparkrun setup features list
+
+# Turn one on / off explicitly
+sparkrun setup features enable executor.local
+sparkrun setup features disable executor.local
+
+# Drop the explicit override and fall back to the channel default
+sparkrun setup features reset executor.local
+```
+
+`list` prints the resolved value and where it came from — `env`, `config`, or
+`channel`:
+
+```
+Feature channel: stable
+
+cli.setup.tailscale    off  (channel)  Experimental 'sparkrun setup tailscale' command group
+executor.local         off  (channel)  Experimental native (no-container) executor
+executor.docker        on   (channel)  Default Docker executor (enabled on all channels; disable to drop docker where it isn't needed)
+```
+
+:::note
+The `setup features` group is hidden from `sparkrun setup --help` on the
+`stable` channel (that's the `cli.setup.features` flag). It is still fully
+functional there — the flag only controls whether the group is advertised.
+:::
+
+## Built-in flags
+
+| Flag | Default | What it gates |
+|---|---|---|
+| `executor.docker` | **on** (all channels) | The default Docker executor. Disable only to drop Docker where it isn't needed. |
+| `gateway.litellm` | **on** (all channels) | The LiteLLM gateway behind `sparkrun proxy`. |
+| `executor.local` | off | The experimental native (no-container) [executor](/advanced/executors/). |
+| `cli.setup.tailscale` | off | The `sparkrun setup tailscale` command group. |
+| `core.external_plugins` | off | Loading [out-of-tree plugins](/advanced/plugins/) from `plugins.paths`. |
+| `cli.setup.features` | on for `beta`/`alpha`, off for `stable` | Visibility only — whether `setup features` appears in `--help`. |
+
+`sparkrun setup features list` is the authoritative list for your install. It
+will show additional flags beyond this table: ones belonging to backends still
+in development, and any registered by [external plugins](/advanced/plugins/).
+Those are undocumented on purpose — they are not ready to be relied on.
+
+## Resolution order
+
+Highest priority first:
+
+1. **Environment override** — `SPARKRUN_FEATURE_<NAME>`, with dots and dashes
+   becoming underscores and the name upper-cased. `executor.local` →
+   `SPARKRUN_FEATURE_EXECUTOR_LOCAL=1`. Handy for CI and one-off debugging.
+2. **Explicit config override** — `features.<name>` in `config.yaml`.
+3. **Per-channel default** declared on the flag.
+4. **The flag's baseline default.**
+5. **Unknown flag → off.** Resolution fails closed.
+
+```yaml
+# ~/.config/sparkrun/config.yaml
+features:
+  channel: alpha          # optional; defaults to the self_update channel
+  executor.local: true    # explicit override beats the channel default
+```
+
+The active channel follows your [update channel](/getting-started/updates/)
+(`stable` / `beta` / `alpha`) unless `features.channel` overrides it — so a
+`stable` install can preview an entire channel's feature set without changing
+which code it actually runs.
+
+## What a disabled flag does
+
+Gating is enforced at the point of use, and it fails loudly rather than
+silently degrading:
+
+- A gated **executor** is absent from `sparkrun cluster create --executor`
+  completion and from executor resolution. Naming it anyway raises
+  `ExecutorUnavailableError` pointing at the flag to enable.
+- A gated **command group** (e.g. `setup tailscale`) hides itself from
+  `--help` and refuses to run with a message naming the flag.
+- A gated **transport** fails closed at use, so an already-imported cluster
+  can't quietly fall back to plain SSH.
+
+Teardown is deliberately *not* gated: a workload launched while a flag was on
+stays stoppable after you turn the flag off.

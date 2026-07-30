@@ -1,0 +1,102 @@
+---
+title: Executors
+description: Selecting Docker or the native Local executor as the launch backend.
+---
+
+An **executor** is the layer that actually launches your workload on a host.
+
+| Selector | Status        | Feature flag | What it does                                                                       |
+|----------|---------------|--------------|------------------------------------------------------------------------------------|
+| `docker` | Stable        | `executor.docker` (on) | `docker run` per host. The default and the production-supported path. |
+| `local`  | Experimental  | `executor.local` (off) | Native subprocess via `setsid`. No container. PID/log files under `~/.cache/sparkrun/local/`. |
+
+Recipes select an executor via the top-level `executor:` field; per-executor
+configuration lives under `executor_config:`. See
+[Recipe format › Executor fields](/recipes/format/#executor-fields) for the
+full field reference.
+
+:::caution[The Local executor is off by default]
+`local` is gated behind a [feature flag](/advanced/feature-flags/) and is
+**off on every release channel**. Enable it before selecting it:
+
+```bash
+sparkrun setup features enable executor.local
+```
+
+A recipe that names a disabled (or unknown) executor fails with
+`ExecutorUnavailableError` — sparkrun never silently downgrades to Docker,
+because running an explicitly-requested workload on the wrong backend is worse
+than failing loudly.
+:::
+
+## When to use each
+
+- **Docker (default)** — every shipped DGX Spark recipe, every multi-node
+  cluster runtime that's been validated end-to-end, every benchmark profile.
+  Stay on Docker unless you have a specific reason to leave.
+- **Local** — bare-metal experimentation when you don't want a container in
+  the loop, or when the host platform doesn't run Docker (e.g. Apple Silicon
+  MLX). Inherits the host's library environment verbatim. Multi-host native
+  cluster runtimes (`vllm-distributed`, `sglang`) work; Ray-based runtimes
+  do not.
+
+## Resolution chain
+
+**Which executor** is picked from the first layer that names one, highest
+priority first:
+
+1. CLI override (`-o executor=local`).
+2. Recipe (`executor:`).
+3. Cluster pin (`sparkrun cluster create … --executor local`).
+4. Runtime default (`runtime.default_executor()`).
+5. `SparkrunConfig.default_executor` in `config.yaml`.
+6. The baseline default — `docker`, unless it has been disabled, in which case
+   the sole remaining enabled executor is used.
+
+**Its configuration** (`executor_config:`) is layered separately, again highest
+priority first: CLI → recipe → runtime default → per-executor runtime
+adjustments → `SparkrunConfig.executor_config` → per-executor defaults (Docker
+ships `DOCKER_DEFAULTS`; Local ships none) → dataclass field defaults.
+
+If a layer names an executor that is unknown or gated off, resolution raises
+`ExecutorUnavailableError` naming the flag to enable. It never falls back to
+Docker.
+
+## Recipe example
+
+```yaml
+model: Qwen/Qwen3-1.7B
+runtime: vllm
+container: scitrera/dgx-spark-vllm:latest
+executor: local
+
+executor_config:
+  working_dir: /opt/qwen3
+  log_dir: /var/log/sparkrun
+  env_file: /etc/sparkrun.env
+  command_prefix: nice -n 10        # prepend to the serve command
+  gpus: "device=0,2"                # → CUDA_VISIBLE_DEVICES=0,2
+
+defaults:
+  port: 8000
+```
+
+## Limitations of the Local executor
+
+- No images, no volumes, no Ray strategy.
+- GPU visibility honors `gpus: all` and `gpus: device=0,1`; anything else
+  logs a warning and leaves visibility to the workload.
+- Process-group lifecycle is hand-coded (`setsid` + `kill -- -<pgid>`); there
+  is no supervisor, no restart-on-crash.
+
+## Status is cross-executor
+
+Docker containers and native `local` workloads are invisible to each other's
+introspection, so sparkrun queries **every enabled executor** on a cluster and
+merges the results. A native workload therefore shows up in `sparkrun status`
+and `sparkrun cluster monitor` alongside containers, and `sparkrun stop --all`
+tears down both.
+
+For the contributor-facing executor reference (`ExecutorConfig.from_chain`
+field-by-field, `EXT_EXECUTOR` SAF discovery), see
+[`docs/EXECUTORS.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/EXECUTORS.md).

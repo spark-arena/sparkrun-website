@@ -1,0 +1,125 @@
+---
+title: Schedulers & Placement
+description: How sparkrun decides which hosts and GPUs a workload lands on.
+---
+
+When you launch a workload, something has to decide *which* hosts run it and
+*which* GPU each rank binds to. That's the **scheduler**. On a cluster running
+one job at a time the choice barely matters; as soon as you run concurrent
+workloads it decides whether they collide.
+
+## Available schedulers
+
+| Selector | Behavior |
+|---|---|
+| `occupancy-sparse` | **Default for new clusters.** Spreads distinct workloads onto the least-loaded hosts and GPUs, using live cluster occupancy. Concurrent runs avoid each other. |
+| `occupancy-dense` | Bin-packs onto the *most*-loaded eligible host/GPU that still fits, minimizing host fanout for capacity utilization. |
+| `greedy` | The sparkrun 0.2.x behavior: always packs from the first host, regardless of what is already running. |
+
+Both occupancy schedulers spread *between* workloads, not *within* one. A
+single job's ranks are still packed onto as few hosts as possible, because
+tensor-parallel traffic wants to ride the fastest link available. What "sparse"
+controls is which hosts a *new* workload lands on.
+
+:::note[On DGX Spark]
+Each DGX Spark has one GPU, so intra- vs inter-host is the only axis: a
+multi-rank job simply takes the N least-loaded hosts.
+:::
+
+## Choosing one
+
+```bash
+# New clusters default to occupancy-sparse
+sparkrun cluster create mylab --hosts 10.0.0.1,10.0.0.2
+
+# Pin a different scheduler
+sparkrun cluster create mylab --hosts 10.0.0.1,10.0.0.2 --scheduler occupancy-dense
+
+# Restore 0.2.x placement on an existing cluster
+sparkrun cluster update mylab --scheduler greedy
+```
+
+Resolution is a short chain, highest priority first:
+
+1. The `sparkrun run --scheduler <name>` flag.
+2. The recipe's `scheduler:` field.
+3. The cluster's `scheduler:` setting.
+
+If nothing names one — which is the case for clusters created by sparkrun
+0.2.x, whose YAML has no `scheduler` key — placement falls back to `greedy` so
+upgrading sparkrun never silently moves existing workloads. sparkrun prints a
+hint recommending the upgrade; take it with `sparkrun cluster update <name>
+--scheduler occupancy-sparse`.
+
+## Memory-aware fit
+
+Occupancy schedulers consider both GPU utilization budget and memory. A
+cluster can cap the usable fraction of each accelerator:
+
+```bash
+sparkrun cluster create mylab --hosts 10.0.0.1 --max-gpu-mem-util 0.85
+```
+
+On DGX Spark's GB10 this cap defaults to 0.85 — the unified-memory
+architecture means the last slice of "GPU memory" is contended with the host,
+so treating 100% as available produces placements that fit on paper and OOM in
+practice. Elsewhere it defaults to 1.0.
+
+:::note[Not the same as `--gpu-mem`]
+`--max-gpu-mem-util` is the *scheduling and fit* cap: how much of the
+accelerator sparkrun treats as available when deciding placement. The
+`--gpu-mem` / `--gpu-memory-utilization` run flag is passed to the serving
+engine itself. Changing one does not change the other.
+:::
+
+The cap resolves per accelerator, highest priority first: the host's own
+accelerator metadata, then the cluster's per-accelerator-type limit, then the
+cluster-wide `--max-gpu-mem-util`, then the platform default, then 1.0.
+
+When no host can satisfy the request, the launch fails with an
+`InsufficientCapacity` error that names the slots seen versus requested rather
+than starting a job that cannot fit.
+
+## Explicit placement with `layout`
+
+:::caution[Experimental — subject to change]
+The `layout:` recipe block is experimental. Its schema and semantics may change
+in a future release, and it is only exercised on heterogeneous clusters, which
+are themselves an early-stage capability. Recipes you intend to share or keep
+long-term should rely on automatic placement instead.
+:::
+
+Auto-packing only applies to single-vendor clusters. When you need ranks pinned
+to specific hosts and accelerator indices, a recipe can declare them
+explicitly, and every scheduler honors the result verbatim.
+
+```yaml
+layout:
+  requires:
+    - capability: cuda        # every placed host must advertise this
+  placements:
+    - host: spark-01
+      ranks: [0]
+    - host: spark-02
+      ranks: [1]
+    - host: rtx-box
+      ranks: [2, 3]
+      local_gpus: [0, 1]      # optional; defaults to 0..len(ranks)-1
+```
+
+`ranks` are global rank numbers. `local_gpus` maps them onto accelerator
+indices on that host — relevant for multi-GPU boxes, and irrelevant on DGX
+Spark where each node has one GPU. An empty `placements` list means auto-place,
+which is only attempted on homogeneous clusters.
+
+On a cluster spanning multiple accelerator vendors a layout is **required**:
+sparkrun raises `LayoutRequired` rather than guessing how to split ranks across
+dissimilar hardware. The same applies to a single host carrying accelerators
+from two vendors — the auto-packer refuses to guess which one receives each
+rank.
+
+## Seeing the result
+
+`sparkrun cluster status` reports occupancy per host — used and free slots,
+plus which workloads hold them — so you can see what the scheduler saw. See
+[Cluster Status](/clusters/status/).

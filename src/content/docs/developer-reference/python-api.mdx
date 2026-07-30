@@ -1,0 +1,112 @@
+---
+title: Python API
+description: Driving sparkrun from Python via the console-free sparkrun.api package.
+---
+
+`sparkrun.api` is the supported way to drive sparkrun from Python. It is
+**console-free**: it never writes to stdout or stderr and never calls
+`sys.exit()`. Failures raise typed exceptions; streaming surfaces return
+iterators of structured records that a caller renders however it likes.
+
+The CLI is itself a renderer over this package, so anything the CLI can do is
+reachable from Python.
+
+:::note
+For shelling out to the CLI instead — exit codes, `--json` output, scripting
+patterns — see [CLI Automation](/developer-reference/cli-automation/).
+:::
+
+## A first call
+
+```python
+import sparkrun.api as api
+
+result = api.run(api.RunOptions(
+    recipe="qwen3-1.7b-vllm",
+    cluster="mylab",
+    overrides={"tensor_parallel": 2},
+    follow=False,
+))
+
+print(result.cluster_id, result.serve_port, result.rc)
+```
+
+`RunOptions` mirrors the `sparkrun run` flag set; `recipe` plus one of `hosts`
+or `cluster` is required and everything else defaults to the CLI's behavior.
+
+## Surfaces
+
+| Function | Purpose |
+|---|---|
+| `run(RunOptions)` | Launch a workload → `RunResult` |
+| `stop(...)` / `stop_all(...)` | Stop one workload or every workload on a cluster |
+| `logs(...)` | Iterate `LogLine` records from a running workload |
+| `status(hosts, …)` | Lean occupancy snapshot → `ClusterStatus` |
+| `status_report(hosts, …)` | Display-oriented status with job metadata enrichment |
+| `schedule(...)` | Compute placement without launching |
+| `list_jobs(...)` | Enumerate persisted job metadata → `JobInfo` |
+| `search_recipes(query, …)` | The recipe catalog → `RecipeSummary` rows |
+| `benchmark(BenchmarkOptions)` / `resume_benchmark(...)` | Run or resume a benchmark |
+| `live_monitor(...)` / `open_live_monitor(...)` | Telemetry + occupancy frames for live monitoring |
+
+Sub-namespaces group the larger surfaces: `api.proxy` (gateway lifecycle,
+models, aliases), `api.setup` (SSH access bootstrap), and `api.tailscale`.
+
+## Errors
+
+Everything derives from `api.SparkrunError`, so a caller can catch that
+generically or discriminate on a subclass:
+
+```python
+try:
+    result = api.run(options)
+except api.InsufficientCapacity as exc:
+    print("need %s slots; cluster has %s" % (exc.required, exc.host_list))
+except api.RecipeNotFound:
+    ...
+except api.SparkrunError as exc:
+    ...
+```
+
+Typed errors include `InsufficientCapacity`, `LayoutRequired`, `RecipeNotFound`,
+`InvalidRegistryFilter`, `HostsUnreachable`, `JobNotFound`, `AmbiguousWorkload`,
+`TrustRejected`, and the benchmark family (`BenchmarkFailed`,
+`NoResumableState`, `CategoryNotFound`, `AmbiguousCategoryError`,
+`FrameworkCategoryMismatch`).
+
+Several carry structured detail rather than just a message —
+`InsufficientCapacity` exposes the status snapshot, host list, and requested
+slot count so a caller can render capacity diagnostics without a second SSH
+round-trip.
+
+## Sharing a session
+
+Every entry point accepts an optional `sctx`. Building one and passing it to a
+chain of calls shares the config, registry manager, and cluster manager instead
+of rebuilding them per call:
+
+```python
+sctx = api.default_sctx()
+
+recipes = api.search_recipes("qwen", sctx=sctx)
+result = api.run(api.RunOptions(recipe=recipes[0].name, cluster="mylab"), sctx=sctx)
+snapshot = api.status(["10.0.0.1", "10.0.0.2"], cluster="mylab", sctx=sctx)
+```
+
+## Trust
+
+`RunOptions.trust` controls what happens when a recipe from a third-party
+registry declares lifecycle hooks:
+
+- `None` — prompt interactively (the CLI default).
+- `True` — pre-acknowledge; hooks run.
+- `False` — refuse; `api.run` raises `TrustRejected`.
+
+Non-interactive callers should set it explicitly rather than inheriting the
+prompting default. See [Security](/advanced/security/).
+
+## Stability
+
+Dataclass shapes and the exception hierarchy are stable. Adding fields is
+non-breaking; removing them is breaking. Anything under a leading underscore
+(`sparkrun.api._run`, …) is internal — import from `sparkrun.api` directly.

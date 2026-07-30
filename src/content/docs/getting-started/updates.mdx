@@ -1,0 +1,120 @@
+---
+title: Updates & Telemetry
+description: Update channels, self-upgrade behavior, and the anonymous telemetry opt-out.
+---
+
+## Updating
+
+```bash
+sparkrun update
+```
+
+This upgrades sparkrun itself (if it was installed via `uv`) and then always
+refreshes your recipe registries from git. `sparkrun setup update` is the same
+command under its full name.
+
+If sparkrun was installed some other way — `pip`, `pipx`, or an editable
+checkout — the self-upgrade step is skipped and only registries are updated.
+
+## Release channels
+
+sparkrun tracks three channels. With no flag, `sparkrun update` stays on your
+current channel; passing a flag **switches** to that channel and updates.
+
+| Channel | Flag | Source |
+|---|---|---|
+| Stable | `--stable` | PyPI releases |
+| Beta | `--beta` | the `develop` branch |
+| Alpha | `--alpha` (or `--yolo`) | the `develop-next` branch |
+
+```bash
+sparkrun update --beta      # switch to beta and update
+sparkrun update             # stay on beta from now on
+sparkrun update --stable    # switch back
+```
+
+The channel also drives [feature-flag defaults](/advanced/feature-flags/) — a
+capability can be on by default for `alpha` while staying off for `stable`. You
+can preview another channel's feature set without changing which code you run
+by setting `features.channel` in `config.yaml`.
+
+:::caution
+`beta` and `alpha` track moving branches. Use `stable` for anything you depend
+on.
+:::
+
+## Anonymous telemetry
+
+sparkrun collects anonymous usage telemetry, and it is **enabled by default**.
+It carries no hostnames, addresses, credentials, or recipe names — see
+[what is collected](#what-is-collected) for the full list, including the one
+field that can identify your work.
+
+### Turning it off
+
+For a single command, without touching config:
+
+```bash
+SPARKRUN_NO_TELEMETRY=1 sparkrun run my-recipe
+```
+
+Prefer this when only some of your runs are sensitive — the rest still
+contribute the signal the project relies on.
+
+To opt out persistently:
+
+```bash
+sparkrun setup telemetry --disable   # persist the opt-out
+sparkrun setup telemetry             # show the current setting
+sparkrun setup telemetry --enable    # turn it back on
+```
+
+The environment variable is the single per-process override and beats the
+persisted setting either way — a truthy value opts out, a falsy value forces it
+on. So `SPARKRUN_NO_TELEMETRY=0` re-enables telemetry for one command even when
+it is disabled in config. The persisted setting lives at `telemetry.enabled` in
+`~/.config/sparkrun/config.yaml`.
+
+### What is collected
+
+Four event types are emitted: `run`, `benchmark`, `update`, and
+`setup_wizard`. Each carries a random installation ID plus:
+
+- OS name, OS release, and CPU architecture.
+- **The model identifier** from the recipe (e.g. `Qwen/Qwen3-1.7B`), plus a
+  quantization/dtype summary.
+- Runtime, executor, and scheduler names; success/return code; duration;
+  whether the run was solo or a dry run.
+- Cluster **shape** — node count, total GPU count, and accelerator
+  vendor/model counts. Not hostnames or addresses.
+- How the recipe was referenced, classified into `spark_arena` / `url` /
+  `file` / `reference` — not the recipe name, path, or URL.
+- Registry **counts** (total, enabled, non-default) — not registry names or
+  URLs.
+- For updates: old/new version, channel, and whether the self-upgrade
+  succeeded. For the wizard: which steps were opted into, skipped, or failed.
+
+Hostnames, IP addresses, SSH usernames, recipe names and paths, registry names,
+and registry URLs are not sent. Emission is best-effort with a sub-second
+timeout, so it never delays or fails a command.
+
+:::caution[Model identifiers are sent as written]
+The recipe's `model` value is sent verbatim. For the usual case — a public
+HuggingFace repo id like `Qwen/Qwen3-1.7B` — that is exactly the signal the
+project wants: which models people actually run.
+
+But the value is not currently filtered by model visibility, so a **private
+repo id** or an **absolute path to weights on local disk** is transmitted as
+written.
+
+If that applies to only some of your work, suppress those runs individually
+rather than turning telemetry off everywhere:
+
+```bash
+SPARKRUN_NO_TELEMETRY=1 sparkrun run my-internal-recipe
+```
+
+The rest of your runs keep contributing the signal the project relies on. Reach
+for the [persistent opt-out](#turning-it-off) only if you'd rather not send
+anything at all.
+:::

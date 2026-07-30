@@ -1,0 +1,134 @@
+---
+title: Security Model
+description: Recipe trust gating, the --trust flag, and what registries imply.
+---
+
+sparkrun runs shell commands derived from recipes — `pre_exec` inside
+containers, `post_exec` inside containers after a health check,
+`post_commands` on the **control machine**. Trust gating exists so a recipe
+fetched from a third-party registry can't silently execute arbitrary commands
+when you launch it.
+
+## When trust is automatic
+
+A recipe is **trusted** (hooks run without prompting) when any of these hold:
+
+- The user passed `--trust` on the CLI.
+- The recipe was loaded from a **local path** — anything outside the
+  registry cache, e.g. a file you wrote, `./recipes/`, or
+  `~/.config/sparkrun/recipes/`.
+- The recipe came from a registry your `registries.yaml` marks
+  `trusted: true`. Every registry sparkrun ships by default is first-party and
+  ships trusted.
+- You marked its registry trusted yourself, with
+  `sparkrun registry trust <name>` or `sparkrun registry add --trust <url>`.
+
+Any registry **you** add is untrusted until you say otherwise.
+
+Trust is a **local** decision recorded in your own
+`~/.config/sparkrun/registries.yaml`. A manifest in the source repository
+cannot grant itself trust.
+
+Otherwise the recipe is **untrusted** and sparkrun prompts before each hook
+surface runs. The same trust decision is shared between `pre_exec`
+(pre-launch) and `post_exec` / `post_commands` (post-launch) — you confirm
+once per recipe per session.
+
+:::danger[URL recipes are never auto-trusted]
+A recipe fetched from a URL — including `@spark-arena/<id>` shortcuts, which
+expand to a URL — is **always** untrusted, regardless of everything above.
+
+Before 0.3.0 these carried no source registry and were treated as local, so
+their hooks ran with no confirmation: sending someone a link was enough to run
+code on their control machine. Fetching is now additionally restricted to
+`https://` with an allowed-host list, redirect re-validation, and a response
+size cap; an off-allowlist host requires explicit confirmation.
+:::
+
+## The `--trust` flag
+
+`sparkrun run --trust <recipe>` skips the prompt for any third-party recipe.
+Use it only when you've reviewed the recipe and intend to run its hook
+content. The flag is hidden from `--help` by design: it should be a
+conscious operator override, not the default workflow.
+
+## What trust does NOT cover
+
+Trust covers more than hooks. An **untrusted** recipe is also refused these
+container-escape surfaces:
+
+| Surface | Untrusted recipes |
+|---|---|
+| `executor_config`: `privileged`, `cap_add`, `security_opt`, `devices`, `user`, `volumes` | Rejected — each maps to a `docker run` flag that defeats the rootless hardening or exposes host state |
+| `executor:` selection | Restricted to `docker` — the rootless, namespaced container is the sandbox that justifies running a registry recipe's serve command at all. `local` runs natively via `setsid` with no container, i.e. arbitrary host code execution |
+| Host bind-mounts (including the undocumented `cluster_config` launch overrides) | Rejected |
+
+Innocuous resource knobs are deliberately *not* gated: `shm_size`, `ipc`,
+`network`, `memory_limit`, `ulimit`, `restart_policy`, `auto_remove`, `labels`.
+
+A **denylist applies regardless of trust**: mounting the host root, the Docker
+control socket, SSH keys, or kernel pseudo-filesystems is refused outright,
+even for a trusted recipe. The guard validates the literal path shape
+(absolute, no `..`, not under a forbidden subtree) because the mount happens on
+a *remote* host whose symlink layout differs from your control machine's.
+
+Recipe `env` values are also no longer expanded against your environment, so a
+third-party recipe cannot exfiltrate `${AWS_SECRET_ACCESS_KEY}` into a
+container it controls.
+
+:::caution[Trusting a registry is still a real decision]
+Once a recipe *is* trusted — local, default-registry, `registry trust`, or
+`--trust` — all of the above become available to it, with no second prompt for
+`cap_add: SYS_ADMIN`. If you don't trust a registry, don't add it.
+:::
+
+## Registry safety rails
+
+sparkrun enforces three additional rails on the registry surface:
+
+- **Git URL allowlist**: `sparkrun registry add` accepts only `https://...`,
+  `git@host:org/repo`, `ssh://...`, and `file://...`. Anything else is
+  rejected before `git clone` is invoked.
+- **Reserved name prefixes**: registry names starting with `sparkrun`,
+  `official`, `arena`, `spark-arena` (and similar) can only be claimed by
+  repositories hosted under approved GitHub organizations. This prevents
+  a third party from impersonating an official source.
+- **Trust is opt-in per registry**: a registry added by URL is untrusted until
+  you mark it so. Only the bundled registries that ship `trusted: true` skip
+  the prompt out of the box.
+
+## Operator checklist
+
+When adding a third-party registry:
+
+1. Inspect every recipe in the registry for `pre_exec`, `post_exec`,
+   `post_commands`, `executor_config.cap_add`, `devices`, and `security_opt`.
+2. Confirm the registry URL matches one of the four allowed schemes.
+3. Run untrusted recipes with `--dry-run` first; the trust prompt makes the
+   per-launch posture explicit before any side effects.
+4. Use `--trust` only when the review is complete and you intend to run the
+   recipe's privileged content.
+5. Reserve `sparkrun registry trust <name>` for registries you operate or
+   review continuously — it removes the prompt for every recipe in them, now
+   and in future updates.
+
+## Other hardening worth knowing
+
+- **The proxy bind address is explicit.** An unconfigured proxy still binds
+  `0.0.0.0` for backward compatibility but warns loudly on every start, and
+  escalates the warning when no master key is set. Proxy state files carrying
+  the master key and upstream API keys are written `0600`. See
+  [proxy](/cli/proxy/).
+- **Sudoers interpolation is validated.** Usernames and the `cache_dir` path
+  are checked against a conservative charset before being written into the
+  scoped sudoers rules the wizard installs.
+- **Secrets are masked in debug output.** Env values whose names contain
+  `token`, `key`, `password`, or `secret` are masked in the Docker executor's
+  DEBUG logs.
+- **Arena OAuth is CSRF-bound.** The callback binds to a per-flow random state
+  nonce and rejects a mismatched or missing state before storing a token.
+
+For the full security narrative (`utils/shell.py` quoting, sudoers
+validation, OAuth callback CORS tightening, trtllm host-key strictness, the
+delegated-copy path), see
+[`docs/SECURITY.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/SECURITY.md).

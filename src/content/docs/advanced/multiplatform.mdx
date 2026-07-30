@@ -1,0 +1,83 @@
+---
+title: Multiplatform Architecture
+description: How sparkrun models accelerator vendors, collectives, and platforms.
+---
+
+sparkrun has a layered model for describing accelerator hardware and the
+collective backends that pair with it. Today **NVIDIA DGX Spark** is the only
+fully-supported platform; AMD (RCCL) and Intel Gaudi (HCCL) ship as scaffolds
+that contributors can fill in without re-plumbing runtimes.
+
+## The layered model
+
+```
+HostHardware            → per-host accelerator + IB metadata
+  + AcceleratorSpec     → vendor / model / count / capabilities
+  + ib_info             → raw IB probe result
+
+CollectiveBackend       → NCCL / RCCL / HCCL (env emission per host)
+HardwarePlatformPlugin  → binds vendor → backend → image defaults → validate
+Executor                → Docker / Local
+```
+
+A single launch resolves these in order:
+
+1. **Probe each host** — `probe_host()` runs one SSH script that emits both
+   accelerator fingerprint and InfiniBand detection data, splitting them by
+   sentinel markers.
+2. **Resolve per-host backends** — `select_backends(host_hardware)` returns
+   a `BackendBundle(accelerator_vendor, collective)` for each host.
+3. **Resolve a platform** — `resolve_platform(host_hardware)` walks the
+   ordered platform registry; the first plugin whose `matches()` returns
+   true wins. `DgxSparkPlatform` (GB10 + RoCEv2) pre-empts the
+   `GenericNvidiaPlatform` catch-all.
+4. **Validate** — `platform.validate_host(host_hardware)` returns warning
+   strings (missing RoCEv2 on DGX Spark, wrong vendor for the platform, etc.).
+   sparkrun logs warnings; it does not raise.
+5. **Compatibility gate** — runtimes that declare `requires_capability:
+   {"rdma:roce-v2"}` etc. fail-fast if any placed host doesn't satisfy the
+   set.
+
+## Capability tags
+
+`AcceleratorSpec.capabilities` is a free-form `frozenset[str]`. Conventions
+in use today:
+
+- `cuda` / `rocm` / `gaudi` — software stack hint.
+- `unified-memory` — DGX Spark, Apple Silicon.
+- `nvlink` — present where applicable.
+- `rdma:roce-v2` — multi-node collective over Mellanox.
+
+A runtime can opt into a capability gate by setting
+`requires_capability = frozenset({"rdma:roce-v2"})`; the central
+compatibility check raises `IncompatibleHardwareError` (with the offending
+host and missing capability listed) before any side effects.
+
+## Built-in platforms
+
+| Platform              | `platform_name`   | Matches                    | Notes                                                                    |
+|-----------------------|-------------------|----------------------------|--------------------------------------------------------------------------|
+| DGX Spark             | `dgx-spark`       | `nvidia` + `model=gb10`    | Spark Arena image defaults; warns on missing RoCEv2.                     |
+| Generic NVIDIA        | `nvidia-generic`  | any `nvidia` accelerator   | Upstream image defaults (`vllm/vllm-openai`, `lmsysorg/sglang`, etc.).   |
+
+Registration order is most-specific first; `DgxSparkPlatform` always wins on
+GB10 hosts.
+
+## Heterogeneous clusters
+
+- **Single-vendor across hosts**: auto-packed (e.g. mixed RTX + H200, both
+  NVIDIA).
+- **Multi-vendor across hosts**: `core/placement.py` raises
+  `LayoutRequiredError`. Recipes must declare a `RecipeLayout` mapping ranks
+  to `(host, local_gpu)` explicitly.
+- **Multi-vendor on one host** (Apple M5 + discrete NVIDIA): also requires
+  explicit layout — the auto-packer refuses to guess which accelerator
+  receives each rank.
+
+## Contributing a platform or collective
+
+For the deep dive on `HostHardware`, the `probe_host` script, what's required
+to add a new platform (AMD / Intel) or wire up a real RCCL / HCCL backend, see
+the contributor-facing
+[`docs/MULTIPLATFORM.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/MULTIPLATFORM.md)
+in the repository.
