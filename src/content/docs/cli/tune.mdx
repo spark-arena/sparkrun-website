@@ -1,6 +1,6 @@
 ---
 title: sparkrun tune
-description: Tune Triton fused MoE kernels for optimal inference performance.
+description: Tune Triton fused MoE and FP8 dense GEMM kernels for optimal inference performance.
 ---
 
 :::caution[Experimental Feature]
@@ -16,34 +16,37 @@ sparkrun tune sglang <recipe> [options]
 sparkrun tune vllm <recipe> [options]
 ```
 
-Run Triton kernel autotuning inside the recipe's container on a single host. This generates optimal tile configurations (BLOCK_M/N/K, warps, stages) for fused MoE kernels at each tensor parallel size. The resulting configs are saved locally and **auto-mounted in future `sparkrun run` invocations** — no manual configuration needed.
+Run kernel autotuning on a single host using a recipe's container image. This generates optimal tile configurations (BLOCK_M/N/K, warps, stages) for fused MoE kernels — and, for vLLM, also for FP8 dense GEMM kernels — at each tensor parallel size. The resulting configs are saved locally and **auto-mounted in future `sparkrun run` invocations** — no manual configuration needed.
 
-Tuning is particularly beneficial for Mixture-of-Experts (MoE) models, where the fused MoE kernel is a performance-critical path. Default Triton configs are generic; tuning finds the best configuration for your specific hardware and model combination.
+Tuning is particularly beneficial for Mixture-of-Experts (MoE) models and FP8 quantized models, where the fused-MoE / FP8 GEMM kernels are performance-critical paths. Default Triton configs are generic; tuning finds the best configuration for your specific hardware and model combination.
 
 ## How it works
 
-1. **Launches a tuning container** on the target host using the recipe's container image
-2. **Clones benchmark scripts** (from SGLang or vLLM source) inside the container
-3. **Detects Triton version** for compatibility
-4. **Runs autotuning** for each requested TP size (sequentially or in parallel)
-5. **Saves configs** to `~/.cache/sparkrun/tuning/{sglang,vllm}/` on the host
-6. **Cleans up** the tuning container
+`sparkrun tune sglang` launches a tuning container on the target host, clones SGLang's benchmark scripts inside it, detects the Triton version, and runs SGLang's autotuner for each requested TP size before tearing the container down.
 
-On subsequent `sparkrun run` invocations, tuning configs are automatically detected and mounted into the container with the appropriate environment variable (`SGLANG_MOE_CONFIG_DIR` for SGLang, `VLLM_TUNED_CONFIG_FOLDER` for vLLM).
+`sparkrun tune vllm` shells out to the [vllm-tune](https://github.com/SeraphimSerapis/vllm-tune) backing engine on the target host. Sparkrun ensures the pinned vllm-tune git ref is checked out under `~/.cache/sparkrun/vllm-tune/<ref>/`, then invokes `vllm-tune.sh --standalone --foreground --mode {moe|fp8|all}` once per TP size. vllm-tune manages its own standalone tuning container per TP, covers both fused MoE and FP8 dense GEMM kernels, and writes results into sparkrun's flat tuning cache via its `--export-sparkrun` integration point. Sparkrun then rsyncs that cache back to the control machine.
+
+In both cases, on subsequent `sparkrun run` invocations the configs are auto-detected and mounted with the appropriate environment variable (`SGLANG_MOE_CONFIG_DIR` for SGLang, `VLLM_TUNED_CONFIG_FOLDER` for vLLM).
+
+### Prerequisites
+
+`sparkrun tune vllm` requires `jq`, `docker`, and `git` on the **remote host** (the DGX Spark, not the control machine). The tuner runs a preflight check and bails with an actionable error if any are missing.
 
 ## Options
 
-| Option | Description |
-|---|---|
-| `--hosts` / `-H` | Comma-separated host list (only the first host is used) |
-| `--hosts-file` | File with hosts (one per line) |
-| `--cluster` | Use a saved cluster by name |
-| `--tp` | TP size(s) to tune (repeatable; default: 1,2,4,8) |
-| `--image` | Override container image |
-| `--output-dir` | Override tuning config output directory |
-| `--skip-clone` | Skip cloning benchmark scripts (if already in image) |
-| `--parallel` / `-j` | Run N tuning jobs concurrently (default: 1 = sequential) |
-| `--dry-run` / `-n` | Show what would be done without executing |
+| Option | Description | Applies to |
+|---|---|---|
+| `--hosts` / `-H` | Comma-separated host list (only the first host is used) | both |
+| `--hosts-file` | File with hosts (one per line) | both |
+| `--cluster` | Use a saved cluster by name | both |
+| `--tp` | TP size(s) to tune (repeatable; default: 1,2,4,8) | both |
+| `--image` | Override container image | both |
+| `--output-dir` | Override tuning config output directory | both |
+| `--parallel` / `-j` | Run N tuning jobs concurrently (default: 1 = sequential) | both |
+| `--dry-run` / `-n` | Show what would be done without executing | both |
+| `--skip-clone` | Skip cloning benchmark scripts (if already in image) | sglang only |
+| `--mode {moe,fp8,all}` | Kernels to tune (default: `all`) | vllm only |
+| `--vllm-tune-ref` | Override the vllm-tune git ref pinned in config | vllm only |
 
 ## SGLang tuning
 
@@ -69,11 +72,14 @@ Requires an SGLang recipe (the recipe's `runtime` must be `sglang`). Configs are
 ## vLLM tuning
 
 ```bash
-# Tune for all default TP sizes (1, 2, 4, 8)
+# Tune both MoE and FP8 kernels for all default TP sizes (1, 2, 4, 8)
 sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1
 
-# Tune for a specific TP size
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --tp 4
+# FP8 dense GEMM only — much faster (~25 min) for non-MoE FP8 models
+sparkrun tune vllm qwen3-4b-fp8 -H 127.0.0.1 --mode fp8 --tp 1
+
+# MoE only
+sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --mode moe --tp 4
 
 # Tune for multiple specific TP sizes
 sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --tp 1 --tp 2 --tp 4
@@ -81,11 +87,22 @@ sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --tp 1 --tp 2 --tp 4
 # Tune with 4 parallel jobs
 sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 -j4
 
+# Pin an in-flight vllm-tune branch for testing
+sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --vllm-tune-ref my-pr-branch
+
 # Preview without running
 sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --dry-run
 ```
 
-Accepts any vLLM recipe variant (`vllm-distributed` or `vllm-ray`). Configs are saved to `~/.cache/sparkrun/tuning/vllm/` and auto-mounted via `VLLM_TUNED_CONFIG_FOLDER`.
+Accepts any vLLM recipe variant (`vllm-ray`, `vllm-distributed`, or `eugr-vllm`). Configs are saved to `~/.cache/sparkrun/tuning/vllm/` and auto-mounted via `VLLM_TUNED_CONFIG_FOLDER`.
+
+The vllm-tune git URL and ref can be pinned in `~/.config/sparkrun/config.yaml`:
+
+```yaml
+tuning:
+  vllm_tune_repo: https://github.com/SeraphimSerapis/vllm-tune.git
+  vllm_tune_ref: main
+```
 
 ## Tuning output
 
@@ -93,8 +110,10 @@ Configs are stored on the host at:
 
 | Runtime | Host path | Container path | Env variable |
 |---|---|---|---|
-| SGLang | `~/.cache/sparkrun/tuning/sglang/` | `/root/sglang_tuning_configs` | `SGLANG_MOE_CONFIG_DIR` |
-| vLLM | `~/.cache/sparkrun/tuning/vllm/` | `/root/vllm_tuning_configs` | `VLLM_TUNED_CONFIG_FOLDER` |
+| SGLang | `~/.cache/sparkrun/tuning/sglang/` | `/tuning/sglang/configs` | `SGLANG_MOE_CONFIG_DIR` |
+| vLLM | `~/.cache/sparkrun/tuning/vllm/` | `/tuning/vllm` | `VLLM_TUNED_CONFIG_FOLDER` |
+
+vLLM tuning configs are stored flat (one JSON per kernel shape); MoE filenames start with `E=...`, FP8 dense GEMM filenames with `N=...`.
 
 Once tuning configs exist on a host, every `sparkrun run` for the matching runtime will mount them automatically. No recipe changes or extra flags are needed.
 

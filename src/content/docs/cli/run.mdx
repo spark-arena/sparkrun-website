@@ -21,23 +21,23 @@ Jobs launch in the background (detached containers) and sparkrun follows logs au
 | `--port` | Override serve port |
 | `--tp` / `--tensor-parallel` | Override tensor parallelism |
 | `--pp` / `--pipeline-parallel` | Override pipeline parallelism |
-| `--gpu-mem` | Override GPU memory utilization (0.0–1.0) |
+| `--gpu-mem` / `--gpu-memory-utilization` / `--mem-fraction-static` | Override GPU memory utilization (0.0–1.0) |
 | `--max-model-len` | Override maximum model context length |
 | `--served-model-name` | Override served model name |
 | `--image` | Override container image (not recommended) |
 | `-o` / `--option` | Override any recipe default: `-o key=value` (repeatable) |
-| `--transfer-mode` | Resource transfer mode: `auto`, `local`, `push`, or `delegated` (overrides cluster setting) |
 | `--dry-run` / `-n` | Show what would be done without executing |
 | `--foreground` | Run in foreground (don't detach) |
 | `--ensure` | Only launch if not already running; exit 0 if already up |
 | `--no-follow` | Don't follow container logs after launch |
 | `--no-sync-tuning` | Skip syncing tuning configs from registries |
 | `--no-rm` | Don't auto-remove containers on exit (keeps containers after stop) |
-| `--rootful` | Run with `--privileged` as root inside container |
-| `--ray-port` | Ray GCS port — default: 46379 (`vllm-ray` only) |
-| `--init-port` | vLLM/SGLang distributed init port — default: 25000 |
-| `--dashboard` | Enable Ray dashboard on head node (`vllm-ray` only) |
-| `--dashboard-port` | Ray dashboard port — default: 8265 |
+| `--memory-limit` | Container memory limit (e.g. `32G`) |
+| `--label` | Set metadata on the container, e.g. `--label com.example.key=value` (repeatable) |
+| `--rootful` | Run with `--privileged` as root inside container (legacy behavior) |
+
+Use `-o key=value` to override recipe defaults — that is the supported way to
+pass engine-level settings through to the serve command.
 
 ## Recipe sources
 
@@ -81,9 +81,20 @@ These options are hidden from `--help` but available for advanced use cases:
 
 | Option | Description |
 |---|---|
+| `--solo` | Force single-host mode regardless of how many hosts are available |
+| `--dp` / `--data-parallel` | Override data parallelism |
+| `--scheduler` | Placement scheduler: `occupancy-sparse`, `occupancy-dense`, or `greedy`. See [Schedulers & Placement](/advanced/schedulers/). |
+| `--transfer-mode` | Resource transfer mode: `auto`, `local`, `push`, or `delegated` (overrides the cluster setting) |
 | `--collect-diagnostics <path>` | Capture the full run lifecycle into an NDJSON file for post-mortem analysis. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics). |
 | `--restart <policy>` | Docker restart policy (`no`, `always`, `unless-stopped`, `on-failure[:N]`) |
-| `--trust` | Trust `post_commands` from third-party registries without confirmation |
+| `--trust` | Trust lifecycle hooks from third-party registries without confirmation. See [Security & Trust](/advanced/security/). |
+| `--rebuild` / `--no-rebuild` | Force the builder to produce a fresh image. No-op for `docker-pull`; forces a rebuild or fresh pull for `eugr`. Overrides the recipe's `builder_config.rebuild`. |
+| `--container-name` | Override the deterministic cluster ID (i.e. use a static container name) |
+| `--executor-args` | Arguments passed directly to the container executor, e.g. `docker run` (repeatable) |
+| `--ray-port` | Ray GCS port — default 46379 (Ray runtimes only) |
+| `--init-port` | vLLM/SGLang distributed init port — default 25000 |
+| `--dashboard` / `--no-dashboard` | Enable or disable the Ray dashboard on the head node (Ray runtimes only; binds `0.0.0.0` when on) |
+| `--dashboard-port` | Ray dashboard port — default 8265 |
 
 ```bash
 # Capture full run diagnostics for debugging
@@ -91,4 +102,7 @@ sparkrun run my-recipe --collect-diagnostics run_diag.ndjson
 
 # Set container restart policy
 sparkrun run my-recipe --restart unless-stopped
+
+# Pin placement behavior for this launch
+sparkrun run my-recipe --scheduler occupancy-dense
 ```

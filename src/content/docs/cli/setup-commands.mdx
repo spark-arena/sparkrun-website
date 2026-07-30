@@ -15,13 +15,22 @@ Guided interactive wizard that walks through the full cluster setup process in o
 
 1. **Install check** — detects whether sparkrun is installed as a uv tool; installs it if not
 2. **Cluster creation** — discovers CX7 peers (when running on a DGX Spark), prompts for hosts, creates/updates a named cluster, and sets it as default
-3. **SSH mesh** — establishes passwordless SSH between all cluster hosts and the control machine
-4. **CX7 configuration** — detects ConnectX-7 interfaces, selects conflict-free subnets, assigns static IPs with jumbo frames (MTU 9000), and distributes host keys. If CX7 IPs are added or changed, the SSH mesh is automatically re-run to ensure full connectivity across all interfaces.
-5. **Docker group** — ensures the SSH user is in the `docker` group on all hosts so containers can run without sudo
-6. **Sudoers entries** — installs scoped sudoers rules for `fix-permissions` and `clear-cache` (no broad sudo)
-7. **earlyoom** — installs and configures OOM protection with inference-aware defaults
+3. **SSH access** — every later phase assumes passwordless control→host SSH, so the wizard establishes it first: it probes each host, and for hosts that answer but reject the key it offers to install one (generating `~/.ssh/sparkrun_ed25519` if you have no identity). Runs right after the cluster-name and SSH-username prompts, before any other probe.
+4. **SSH mesh** — establishes passwordless SSH between all cluster hosts as well as the control machine
+5. **CX7 configuration** — detects ConnectX-7 interfaces, selects conflict-free subnets, assigns static IPs with jumbo frames (MTU 9000), and distributes host keys. If CX7 IPs are added or changed, the SSH mesh is automatically re-run to ensure full connectivity across all interfaces.
+6. **Docker group** — ensures the SSH user is in the `docker` group on all hosts so containers can run without sudo
+7. **NVIDIA CDI** — generates `/etc/cdi/nvidia.yaml` so Docker can resolve the GPU. sparkrun requests GPUs via CDI rather than `--gpus`.
+8. **Sudoers entries** — installs scoped sudoers rules for `fix-permissions` and `clear-cache` (no broad sudo)
+9. **earlyoom** — installs and configures OOM protection with inference-aware defaults
 
 Each phase is optional — you can skip any step when prompted, and configure it later with the individual subcommand.
+
+:::note[Windows control machines]
+The SSH access phase is written to run on a bare Windows control node: it needs
+only `ssh` and `ssh-keygen` (both shipped with Windows 10+), never a local
+`bash`. Key material travels over stdin rather than the command line so it
+can't be mangled by local shell quoting.
+:::
 
 ```bash
 sparkrun setup wizard
@@ -45,6 +54,46 @@ Running `sparkrun setup` with no subcommand auto-launches the wizard when no def
 :::note
 When running on a DGX Spark with CX7 interfaces, the wizard auto-detects peer Sparks on CX7 subnets. It reports discovered peers and suggests management IPs as defaults.
 :::
+
+## Check readiness
+
+```bash
+sparkrun setup check [--cluster mylab] [--json]
+```
+
+Probes each host for the things the wizard configures and reports gaps —
+**without changing anything**. Use it to verify a cluster before a first run,
+or to find what drifted after one.
+
+Checks, in order: `docker_installed`, `docker_group`, `docker_usable`,
+`nvidia_ctk`, `cdi_spec`, `earlyoom`, `sudoers`, `ssh_mesh`, `cx7`.
+
+Each result is `OK`, `WARN`, `FAIL`, or `SKIP`, and a non-OK result names the
+command that would fix it. `--json` emits the same results machine-readably.
+
+## Feature flags
+
+```bash
+sparkrun setup features list
+sparkrun setup features enable executor.local
+sparkrun setup features disable executor.local
+sparkrun setup features reset executor.local
+```
+
+Manage the gates on experimental capabilities. See
+[Feature Flags](/advanced/feature-flags/) for the full list and resolution
+order.
+
+## Telemetry
+
+```bash
+sparkrun setup telemetry            # show the current setting
+sparkrun setup telemetry --disable  # opt out
+sparkrun setup telemetry --enable   # opt back in
+```
+
+See [Updates & Telemetry](/getting-started/updates/#anonymous-telemetry) for
+what is collected.
 
 ## Install sparkrun
 

@@ -1,29 +1,62 @@
 ---
 title: sparkrun logs
-description: Re-attach to inference workload logs.
+description: Read and follow inference workload logs.
 ---
 
 ```bash
 sparkrun logs <target> [options]
 ```
 
-Re-attach to the log output of a running inference workload. TARGET can be a recipe name or a cluster ID (from `sparkrun status` output). Ctrl+C safely detaches — it never kills the inference job.
+Show the logs of a running workload, with `docker logs` / `journalctl`
+semantics. TARGET can be a recipe name or a cluster ID (from `sparkrun status`
+output).
+
+Called bare, it dumps the workload's logs and exits. Use `-f` to stay attached
+and stream new output — Ctrl+C detaches and never kills the inference job.
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `--hosts` / `-H` | Comma-separated host list |
-| `--hosts-file` | File with hosts |
+| `--hosts-file` | File with hosts (one per line, `#` comments) |
 | `--cluster` | Use a saved cluster by name |
 | `--tp` / `--tensor-parallel` | Match host trimming from run |
 | `--port` | Override port (to match run-time override) |
 | `--served-model-name` | Override served model name (to match run-time override) |
-| `--tail` | Number of existing log lines to show (default: 100) |
+| `-n` / `--lines` / `--tail` | Number of log lines to show (default: all). With `-f`, sets the scrollback shown before following. |
+| `-f` / `--follow` | Stay attached and stream new lines |
+| `-a` / `--all-sources` | Read every worker/rank, not just the head |
 
-## Examples
+## Reading workers
+
+By default `sparkrun logs` reads the head. `-a` / `--all-sources` adds every
+worker:
+
+- **Without `-f`**, each source is dumped in full — head first, then workers by
+  rank.
+- **With `-f`**, the streams interleave in arrival order.
 
 ```bash
-sparkrun logs nemotron3-nano-30b-nvfp4-vllm --cluster mylab
-sparkrun logs qwen3-1.7b-vllm --tp 2 --tail 50
+# Dump everything the head has logged
+sparkrun logs qwen3-1.7b-vllm --cluster mylab
+
+# Last 200 lines, then follow
+sparkrun logs qwen3-1.7b-vllm --cluster mylab -n 200 -f
+
+# Follow head and all workers together
+sparkrun logs e5f6a7b8 -f -a
 ```
+
+:::note[Changed in 0.3.0]
+`--tail` previously defaulted to 100 lines and always followed. It is now
+`-n` / `--lines` / `--tail`, defaults to showing **all** lines, and following
+is opt-in via `-f`.
+:::
+
+:::tip
+Some runtimes launch the server with `docker exec` inside a long-lived
+container, so the container's own stdout is not the workload's log. sparkrun
+resolves the right log location per runtime, which is why `sparkrun logs` finds
+output that a plain `docker logs` on the host would miss.
+:::

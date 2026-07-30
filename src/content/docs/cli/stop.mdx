@@ -13,7 +13,7 @@ Stop containers for a running inference workload across all hosts. TARGET can be
 
 | Option | Description |
 |---|---|
-| `--all` / `-a` | Stop all sparkrun containers (discovers via `docker ps`). No target needed. |
+| `--all` / `-a` | Stop every sparkrun workload on the cluster. No target needed. |
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts |
 | `--cluster` | Use a saved cluster by name |
@@ -37,4 +37,14 @@ sparkrun stop --all --hosts 10.24.11.13,10.24.11.14
 
 :::caution
 The `--hosts`/`--cluster`/`--tp` flags must match the original `run` command so sparkrun can find the right containers. If you launched with `--tp 2`, pass `--tp 2` to stop as well.
+:::
+
+:::note[Discovery and reporting in 0.3.0]
+`--all` discovers workloads through the same cross-executor status source as
+[`sparkrun status`](/cli/status/), so it also stops workloads launched by the
+native `local` executor — not just Docker containers.
+
+Teardown now verifies and counts what it actually removed instead of trusting
+the removal command's exit code, so a stop that fails on one host reports that
+host rather than exiting 0 while leaving VRAM held.
 :::

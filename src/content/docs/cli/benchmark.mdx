@@ -11,6 +11,20 @@ The `sparkrun benchmark` command runs end-to-end benchmarking: it launches infer
 sparkrun benchmark <recipe> [options]
 ```
 
+### Categories
+
+Benchmarks are grouped into **categories**, each with its own subcommand. Bare
+`sparkrun benchmark <recipe>` falls through to `performance`:
+
+| Command | Measures |
+|---|---|
+| `sparkrun benchmark performance <recipe>` (alias `perf`) | Throughput and latency. The default. |
+| `sparkrun benchmark tools <recipe>` | Tool-calling / function-calling behavior. |
+| `sparkrun benchmark run <recipe>` | Legacy entry point that imposes no category. |
+
+New categories appear automatically when a benchmarking plugin registers them,
+so `sparkrun benchmark --help` is the authoritative list for your install.
+
 ## Quick examples
 
 ```bash
@@ -63,13 +77,18 @@ Each step can be controlled independently:
 | `-o` / `--option`            | Override recipe options: `-o key=value` (repeatable)     |
 | `--profile`                  | Benchmark profile name or file (`@registry/name` syntax) |
 | `--framework`                | Override benchmarking framework (default: `llama-benchy`) |
-| `--out` / `--output`         | Output file for results YAML                             |
+| `--output`                   | Output file for results YAML                             |
 | `-b` / `--benchmark-option`  | Override benchmark args: `-b key=value` (repeatable)     |
+| `--api-key-env`              | Name of the env var to read the API key from (e.g. `OPENAI_API_KEY`) |
 | `--exit-on-first-fail` / `--no-exit-on-first-fail` | Abort on first benchmark failure (default: enabled) |
 | `--no-stop`                  | Don't stop inference after benchmarking                  |
 | `--skip-run`                 | Skip launching inference (benchmark existing instance)   |
 | `--sync-tuning`              | Sync tuning configs from registries before benchmarking  |
-| `--timeout`                  | Benchmark timeout in seconds (default: 14400)            |
+| `--rootful`                  | Run with `--privileged` as root inside container (legacy behavior) |
+| `--timeout`                  | Benchmark timeout in seconds (default: 14400, or from the profile) |
+| `--fresh`                    | Force a fresh start, deleting any prior state            |
+| `--resume`                   | Resume prior state without prompting (mutually exclusive with `--fresh`) |
+| `--arena`                    | Run the opinionated [Spark Arena](/tutorials/spark-arena/) flow and submit results |
 | `--dry-run` / `-n`           | Show what would be done without executing                |
 
 ## Benchmark configuration
@@ -151,13 +170,32 @@ sparkrun_benchmark:
       - {pp: 2048, tg: 32, depth: 0, ...}
 ```
 
-The output filename is auto-generated as `benchmark_<recipe>_<profile>_tp<N>.yaml` (with `_pp<N>` suffix when pipeline parallelism > 1) unless `--out` is specified.
+The output filename is auto-generated as `benchmark_<recipe>_<profile>_tp<N>.yaml` (with `_pp<N>` suffix when pipeline parallelism > 1) unless `--output` is specified.
 
 ## Scheduling and resumability
 
 Multi-task benchmark runs (a profile with several `pp`/`tg`/`depth`/`concurrency` combinations) are driven by a small scheduler that persists progress between tasks. State is checkpointed after each task, so an interrupted run can be resumed without re-executing completed tasks — useful when a long sweep is killed by a transient failure, an OOM, or `Ctrl+C` mid-sweep.
 
 `--exit-on-first-fail` (default) stops the sweep on the first task failure so the issue can be addressed before more compute is spent; `--no-exit-on-first-fail` keeps marching through remaining tasks. State files live under `~/.cache/sparkrun/benchmarks/`.
+
+An interactive run prompts before resuming. For non-interactive use, decide up
+front:
+
+```bash
+sparkrun benchmark perf my-recipe --resume   # continue prior state, no prompt
+sparkrun benchmark perf my-recipe --fresh    # discard prior state
+sparkrun benchmark resume <benchmark-id>     # resume a specific run by ID
+```
+
+### Identity and image pinning
+
+A run's identity is tied to the *content* of the recipe, so editing a recipe
+starts a new run instead of silently resuming state measured against different
+settings.
+
+Within a run, the container image is pinned by its content-addressable digest
+on first launch and reused for every subsequent and resumed task. A re-pushed
+tag or a locally rebuilt image therefore cannot change the bits mid-sweep.
 
 ### Framework version pinning
 

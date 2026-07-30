@@ -20,17 +20,28 @@ Show sparkrun containers running on cluster hosts. Displays containers grouped b
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts (one per line, `#` comments) |
 | `--cluster` | Use a saved cluster by name |
+| `--json` | Emit machine-readable JSON instead of the table |
 | `--dry-run` / `-n` | Show what would be done |
 
 If no options are given, uses the default cluster.
 
 ## What it shows
 
-- **Running jobs** — containers grouped by cluster ID, with role (head/worker/solo), host, status, and image
+- **Running jobs** — workloads grouped by cluster ID, with role (head/worker/solo), host, status, and image
 - **IP mapping** — when InfiniBand was detected, shows the complementary IP (management or IB) alongside each host so you can identify both addresses
-- **Idle hosts** — hosts with no sparkrun containers
+- **Idle hosts** — hosts with no sparkrun workloads
 - **Pending operations** — active downloads or image distributions that haven't launched containers yet, with elapsed time. These will consume VRAM once launched
 - **Copy-paste commands** — ready-to-use `sparkrun logs` and `sparkrun stop` commands for each job
+
+:::note[Cross-executor since 0.3.0]
+Status is no longer a `docker ps` sweep. sparkrun asks every enabled executor
+that shares the cluster's substrate and merges the answers, so a workload
+started by the native [`local` executor](/advanced/executors/) appears alongside
+Docker containers — neither is visible to the other's introspection.
+
+A single failing executor is skipped rather than breaking the whole report, and
+unreachable hosts are simply absent from the output.
+:::
 
 ## Examples
 

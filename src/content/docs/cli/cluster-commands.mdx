@@ -22,6 +22,11 @@ sparkrun cluster create <name> --hosts <ip1>,<ip2>,... [options]
 | `--cache-dir` | HuggingFace cache directory on cluster hosts (useful when control machine and cluster have different paths, e.g. macOS → Linux) |
 | `--transfer-mode` | Resource transfer mode: `auto`, `local`, `push`, or `delegated` |
 | `--transfer-interface` | Network interface for transfers: `auto`, `cx7`, or `mgmt` |
+| `--scheduler` | Placement scheduler (default `occupancy-sparse`). See [Schedulers & Placement](/advanced/schedulers/). |
+| `--max-gpu-mem-util` | Fraction of each accelerator's memory treated as usable for placement |
+| `--executor` | Pin the launch [executor](/advanced/executors/) for this cluster |
+| `--executor-opt` / `-o` | Per-executor config, `-o key=value` (repeatable) |
+| `--default` | Set this cluster as the default after creating it |
 
 ```bash
 sparkrun cluster create mylab \
@@ -45,10 +50,24 @@ sparkrun cluster update <name> [options]
 
 All options are the same as `create`. Only provided options are updated — omitted fields are left unchanged. Pass `--user ""` or `--cache-dir ""` to explicitly clear a value.
 
+`update` additionally accepts:
+
+| Option | Description |
+|---|---|
+| `--add-host` | Add a host without restating the whole list (repeatable) |
+| `--remove-host` | Remove a host (repeatable) |
+| `--topology` | Set the cluster's network topology |
+| `--infer-hardware` | Probe hosts and record detected accelerator metadata |
+| `--clear-executor-config` | Drop any stored per-executor config |
+
 ```bash
 sparkrun cluster update mylab --hosts 10.24.11.13,10.24.11.14,10.24.11.15
+sparkrun cluster update mylab --add-host 10.24.11.15
 sparkrun cluster update mylab --transfer-mode delegated
 sparkrun cluster update mylab --user newuser
+
+# Adopt the 0.3.x default placement on a cluster created by sparkrun 0.2.x
+sparkrun cluster update mylab --scheduler occupancy-sparse
 ```
 
 See [Resource Transfer Modes](/getting-started/networking/#resource-transfer-modes) for details on transfer mode options.
@@ -75,6 +94,29 @@ Displays name, description, user, cache directory, transfer mode, default status
 sparkrun cluster delete <name>
 sparkrun cluster delete <name> --force    # skip confirmation prompt
 ```
+
+## Inspect effective configuration
+
+```bash
+sparkrun cluster inspect [name]
+```
+
+Shows the *resolved* cluster settings — transfer mode, transfer interface,
+topology, SSH user, and cache directories — and checks whether those cache
+directories actually exist on each remote host. Useful for diagnosing
+configuration, transfer, or permission problems without running a job.
+
+## Import an existing cluster
+
+```bash
+sparkrun cluster import svd <path-to-.env>
+```
+
+Imports a spark-vllm-docker `.env` file into a sparkrun cluster, mapping
+`CLUSTER_NODES` to hosts, `ETH_IF` to fabric interfaces, and `CONTAINER_*` to
+env references. The env references are resolved from the file at launch time,
+so secrets stay out of the cluster YAML. Re-running syncs in place. Aliased as
+`sparkrun cluster import eugr`.
 
 ## Set/unset default cluster
 
@@ -127,6 +169,7 @@ Live-monitor CPU, RAM, and GPU metrics across cluster hosts. By default launches
 | `--cluster` | Use a saved cluster by name |
 | `--interval` / `-i` | Sampling interval in seconds (default: 2) |
 | `--simple` | Use plain-text output instead of TUI |
+| `--json` | Emit telemetry samples as JSON |
 | `--dry-run` / `-n` | Show what would be done |
 
 ```bash
@@ -134,3 +177,10 @@ sparkrun cluster monitor --cluster mylab
 sparkrun cluster monitor --cluster mylab --interval 5
 sparkrun cluster monitor --cluster mylab --simple
 ```
+
+:::note
+The TUI combines two streams: per-host telemetry (CPU/RAM/GPU) and workload
+occupancy from the same cross-executor source `sparkrun status` uses. Its Jobs
+column therefore shows every executor's workloads, not just Docker containers.
+The `--simple` and `--json` paths are telemetry-only.
+:::

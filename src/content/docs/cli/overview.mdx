@@ -49,6 +49,14 @@ sparkrun provides a unified CLI for managing LLM inference workloads on DGX Spar
 | `sparkrun recipe search <query>` | Search for recipes by name, model, or description |
 | `sparkrun recipe validate <recipe>` | Validate a recipe file |
 | `sparkrun recipe vram <recipe>` | Estimate VRAM usage for a recipe |
+| `sparkrun recipe update` | Refresh recipe registries from git |
+
+:::tip[Scoping to one registry]
+`list` and `search` accept an `@registry` scope in the query itself:
+`sparkrun list @community` and `sparkrun list @community/qwen` are equivalent to
+`--registry community`. An unknown or disabled registry is reported as an error
+rather than returning "no recipes found".
+:::
 
 :::tip
 Recipes can be local names, file paths, URLs, or [Spark Arena](https://spark-arena.com) shortcuts (`@spark-arena/<recipe-id>`). For example: `sparkrun run @spark-arena/abc123` or `sparkrun show @spark-arena/abc123`.
@@ -66,6 +74,10 @@ Recipes can be local names, file paths, URLs, or [Spark Arena](https://spark-are
 | `sparkrun registry update [name]` | Update registries from git |
 | `sparkrun registry list-benchmark-profiles` | List available benchmark profiles |
 | `sparkrun registry show-benchmark-profile <name>` | Show benchmark profile details |
+| `sparkrun registry trust <name>` | Trust a registry's recipes (skip hook confirmation) |
+| `sparkrun registry untrust <name>` | Revoke a registry's trust |
+| `sparkrun registry export-metadata` | Export registry metadata |
+| `sparkrun registry revert-to-defaults` | Restore the built-in default registry list |
 
 [Spark Arena](https://spark-arena.com) is included as a default registry. See [Registries](/recipes/registries/) for details.
 
@@ -84,6 +96,8 @@ Recipes can be local names, file paths, URLs, or [Spark Arena](https://spark-are
 | `sparkrun cluster status` | Show sparkrun containers running on cluster hosts |
 | `sparkrun cluster check-job <target>` | Check if a job is running (exit 0 = running, 1 = not) |
 | `sparkrun cluster monitor` | Live-monitor CPU, RAM, and GPU metrics across hosts |
+| `sparkrun cluster inspect [name]` | Show effective cluster config and check remote cache dirs |
+| `sparkrun cluster import svd <path>` | Import a spark-vllm-docker `.env` file into a cluster (aliased as `eugr`) |
 
 ### Export commands
 
@@ -144,4 +158,14 @@ See [Spark Arena](https://spark-arena.com) for the leaderboard and community ben
 | `sparkrun setup clear-cache` | Drop Linux page cache on cluster hosts to free memory |
 | `sparkrun setup earlyoom` | Install and configure earlyoom OOM protection on cluster hosts |
 | `sparkrun setup wizard` | Guided setup wizard (cluster, SSH, CX7, Docker group, sudoers, earlyoom) |
+| `sparkrun setup check` | Non-destructive readiness probe of a cluster's hosts |
 | `sparkrun setup diagnose` | Collect hardware/firmware/network/Docker diagnostics |
+| `sparkrun setup docker-group` | Add the SSH user to the `docker` group on cluster hosts (`usermod -aG docker`) |
+| `sparkrun setup fe-system-update` | Full system update on DGX Spark Founders Edition hosts (apt + firmware + reboot) |
+| `sparkrun setup telemetry` | View or change [anonymous telemetry](/getting-started/updates/#anonymous-telemetry) settings |
+| `sparkrun setup features` | Manage [feature flags](/advanced/feature-flags/) (`list`/`enable`/`disable`/`reset`) |
+| `sparkrun setup uninstall [cluster]` | Reverse the wizard's changes for a cluster, in reverse order |
+
+`sparkrun setup tailscale` (publish an inference endpoint on a tailnet) ships
+gated behind a feature flag and is hidden until enabled. See
+[Feature Flags](/advanced/feature-flags/).

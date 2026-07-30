@@ -13,10 +13,25 @@ The proxy sits in front of one or more inference workloads launched by sparkrun 
 - **Auto-discovery** background process that periodically re-scans and syncs models
 - **Health checking** via `GET /v1/models` on each discovered endpoint
 - **Deduplication** of endpoints reachable on multiple network interfaces (e.g. management IP vs ConnectX-7 IP)
-- **Model aliases** managed via the LiteLLM management API (no restart required)
+- **Model aliases** so clients can address a model by a friendly name
 - **Load/unload** models through `sparkrun proxy load` / `sparkrun proxy unload`
 
-The proxy runs LiteLLM via `uvx --from 'litellm[proxy]' litellm` — no permanent installation required.
+The proxy runs LiteLLM via `uvx --from 'litellm[proxy]==1.82.6' litellm` — no
+permanent installation required.
+
+:::note[How changes are applied]
+The generated config file is the single source of truth for the proxy's model
+list. LiteLLM's runtime mutation endpoints (`/model/new`, `/model/delete`)
+require a database-backed model store — PostgreSQL plus a generated prisma
+client — which sparkrun does not provision, so against a sparkrun-launched
+proxy they answer `500 No DB Connected`.
+
+Applying a change therefore means **rewriting the config and restarting the
+process**. sparkrun skips the restart entirely when the desired model set
+already matches what is on disk, so a steady-state auto-discover sweep costs
+nothing and never interrupts serving. The management API is still used
+read-only, to report what the proxy is currently serving.
+:::
 
 ## Quick start
 
@@ -48,36 +63,61 @@ curl http://localhost:4000/v1/models
 
 ### `sparkrun proxy start`
 
-Discovers running endpoints, generates a LiteLLM config, and launches the proxy. When a cluster or hosts are specified, discovery uses live SSH queries (`docker ps`) for authoritative container state. A background auto-discover process periodically re-scans and syncs models with the proxy.
+Discovers running endpoints, generates a LiteLLM config, and launches the proxy. A background auto-discover process periodically re-scans and syncs models with the proxy.
 
 ```bash
-sparkrun proxy start                          # defaults: 0.0.0.0:4000
+sparkrun proxy start                          # port 4000
+sparkrun proxy start --host 127.0.0.1         # recommended bind address
 sparkrun proxy start --port 8080              # custom port
-sparkrun proxy start --cluster mylab          # discover from cluster hosts (live SSH)
+sparkrun proxy start --cluster mylab          # discover from cluster hosts
 sparkrun proxy start --hosts 10.0.0.1,10.0.0.2  # explicit host list
 sparkrun proxy start --foreground             # run in foreground (blocking)
-sparkrun proxy start --master-key sk-mykey    # enable LiteLLM auth
+sparkrun proxy start --master-key sk-mykey    # require a bearer token
 sparkrun proxy start --no-auto-discover       # disable periodic re-scanning
 sparkrun proxy start --discover-interval 60   # re-scan every 60s (default: 30)
+sparkrun proxy start --restart                # replace an already-running proxy
 sparkrun proxy start --dry-run                # show what would be done
 ```
 
 By default the proxy daemonizes in the background. Logs are written to `~/.cache/sparkrun/proxy/litellm.log`.
+
+Starting when a proxy is already running is an error; pass `--restart` to
+replace it with one carrying the new settings. Explicitly-supplied settings are
+persisted to `proxy.yaml` either way.
 
 #### Options
 
 | Option | Description |
 |---|---|
 | `--port` | Proxy listen port (default: 4000) |
-| `--host` | Bind address (default: 0.0.0.0) |
-| `--master-key` | LiteLLM master key for auth (default: sk-sparkrun) |
+| `--host` | Bind address — persisted to `proxy.yaml`. Recommended: `127.0.0.1`. |
+| `--master-key` | Bearer token for stateless LiteLLM auth (default: none) |
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts (one per line) |
 | `--cluster` | Use a saved cluster by name |
 | `--foreground` | Run in foreground (blocking) |
 | `--no-auto-discover` | Disable periodic endpoint re-scanning |
 | `--discover-interval` | Seconds between discovery sweeps (default: 30) |
+| `--restart` | If a proxy is already running, stop it and start fresh with the new settings |
 | `--dry-run` / `-n` | Show what would be done without executing |
+
+:::caution[Bind address]
+When no bind host has ever been configured, the proxy keeps the legacy
+`0.0.0.0` default for backward compatibility — exposing every discovered
+inference backend to your whole network — and warns loudly on every start. The
+warning escalates when no master key is set, because the gateway is then
+unauthenticated.
+
+Silence it by choosing explicitly: `--host 127.0.0.1` to restrict exposure, or
+`--master-key <secret>` to require a token. Both are persisted.
+:::
+
+:::note[Authentication needs no database]
+Setting a master key enables LiteLLM's **stateless** bearer-token check via
+`general_settings.master_key`. No database is involved. Features that would
+need one — virtual keys, budgets, request logging, the `/ui` — are out of
+scope; a stale `enable_ui` key in `proxy.yaml` is warned about and ignored.
+:::
 
 ### `sparkrun proxy stop`
 
@@ -148,7 +188,7 @@ sparkrun proxy unload qwen3-1.7b-vllm --cluster mylab
 
 ### `sparkrun proxy alias`
 
-Manage model aliases so clients can reference models by friendly names. Aliases are applied and removed via the LiteLLM management API — no proxy restart required.
+Manage model aliases so clients can reference models by friendly names.
 
 ```bash
 sparkrun proxy alias add qwen3-small "Qwen/Qwen3-1.7B"
@@ -156,24 +196,31 @@ sparkrun proxy alias remove qwen3-small
 sparkrun proxy alias list
 ```
 
+An alias is saved to `proxy.yaml` immediately. If a proxy is running, the
+config is regenerated and the proxy restarted so the alias takes effect. An
+alias whose target model has no healthy backend is saved but skipped in the
+generated config — it starts working as soon as the target is loaded.
+
 ## How discovery works
 
-1. SSHes into each host and runs `docker ps --filter 'name=sparkrun_'` to find running containers
-2. Enriches each running container group with cached job metadata (`~/.cache/sparkrun/jobs/*.yaml`)
+1. Enumerates persisted job metadata (`~/.cache/sparkrun/jobs/*.yaml`) for every workload sparkrun has launched
+2. Takes a live cluster status snapshot to determine which of those are actually running — the same cross-executor source `sparkrun cluster status` uses, so native (`local`) workloads are visible too, not only Docker containers
 3. Normalises host IPs to management IPs (prefers management IPs over InfiniBand IPs)
 4. Performs parallel health checks via `GET /v1/models` (3-second timeout)
 5. Returns only healthy endpoints
 
-This is the same mechanism used by `sparkrun cluster status` and `sparkrun cluster monitor`.
+When no host context is available, discovery falls back to metadata only and
+skips the liveness step.
 
 ### Auto-discovery
 
 When the proxy starts with auto-discover enabled (the default), a background process runs alongside the proxy:
 
 - Periodically re-discovers endpoints at the configured interval (default: 30 seconds)
-- Syncs results with the proxy via the LiteLLM management API (adds new models, removes stale ones)
-- Also syncs configured aliases on each sweep
-- Monitors the proxy PID and exits automatically when the proxy dies
+- Reconciles models **and** aliases in one pass — they share a single config file, so applying them separately would restart the proxy twice per sweep
+- Rewrites the config and restarts the proxy only when the desired model set actually differs from what is on disk
+- Re-reads the proxy PID each sweep, so it follows a restart instead of mistaking it for a shutdown
+- Monitors that PID and exits automatically when the proxy dies
 
 Disable with `--no-auto-discover` or set `auto_discover: false` in `proxy.yaml`.
 
@@ -184,17 +231,31 @@ Persistent proxy settings are stored in `~/.config/sparkrun/proxy.yaml`:
 ```yaml
 proxy:
   port: 4000
-  host: 0.0.0.0
-  master_key: null        # set to enable LiteLLM auth (requires SQLite DB)
+  host: 127.0.0.1         # recommended; unset keeps the legacy 0.0.0.0 + warning
+  master_key: null        # set to require a bearer token (stateless; no DB)
   auto_discover: true
   discover_interval: 30   # seconds between re-scans
+  gateway: litellm        # optional; pins the gateway implementation
 
 aliases:
   my-model: "Qwen/Qwen3-1.7B"
   gpt-4: "Qwen/Qwen3-30B-A3B"
 ```
 
-CLI flags override config file values for a given invocation.
+CLI flags override config file values for a given invocation, and explicitly
+supplied values are persisted back.
+
+### Gateway selection
+
+LiteLLM is currently the only gateway implementation, and it is enabled on
+every channel via the `gateway.litellm` [feature flag](/advanced/feature-flags/).
+The `proxy.gateway` key exists so an alternate implementation can be selected
+later; exactly one gateway is used at a time. Pinning a gateway that is
+disabled or unknown is an error rather than a silent fallback.
+
+Bringing the proxy *up* is gated by that flag. Managing an already-running
+proxy — `stop`, `status`, `models`, aliases — is not, so a proxy started while
+the flag was on stays stoppable if you later turn it off.
 
 ## State files
 
@@ -202,9 +263,15 @@ CLI flags override config file values for a given invocation.
 |---|---|
 | `~/.config/sparkrun/proxy.yaml` | Persistent proxy settings and aliases |
 | `~/.cache/sparkrun/proxy/litellm_config.yaml` | Generated LiteLLM config |
-| `~/.cache/sparkrun/proxy/state.yaml` | Running proxy state (PID, port, auto-discover PID, start time) |
+| `~/.cache/sparkrun/proxy/state.yaml` | Running proxy state (PID, port, host, gateway, auto-discover PID, start time) |
 | `~/.cache/sparkrun/proxy/litellm.log` | Proxy process stdout/stderr |
-| `~/.cache/sparkrun/proxy/litellm.db` | LiteLLM database (only when `master_key` is set) |
 | `~/.cache/sparkrun/proxy/autodiscover.yaml` | Auto-discover process config |
 | `~/.cache/sparkrun/proxy/autodiscover.log` | Auto-discover process stdout/stderr |
 | `~/.cache/sparkrun/jobs/*.yaml` | Job metadata used for endpoint discovery |
+
+:::note[File permissions]
+`litellm_config.yaml`, `state.yaml`, and `autodiscover.yaml` all carry the
+master key and every upstream endpoint's API key, so they are created
+owner-only (`0600`) inside an owner-only directory (`0700`), and sparkrun
+refuses to follow a symlink at those paths.
+:::

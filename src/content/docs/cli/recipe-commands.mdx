@@ -19,6 +19,7 @@ List available recipes from all configured registries. Optionally filter by a se
 | `--all` / `-a` | Include recipes from hidden registries |
 | `--runtime` | Filter by runtime (e.g., `vllm`, `sglang`) |
 | `--registry` | Filter by registry name |
+| `--json` | Emit machine-readable JSON instead of the table |
 
 The output table includes:
 
@@ -31,6 +32,35 @@ The output table includes:
 | GPU Mem | Default `gpu_memory_utilization` setting (`-` if not set) |
 | Registry | Source registry name or `local` |
 | File | Recipe filename stem |
+
+### Scoping to a registry
+
+The query itself accepts the same `@registry` syntax recipe *names* use:
+
+```bash
+sparkrun list @community        # same as --registry community
+sparkrun list @community/       # same
+sparkrun list @community/qwen   # --registry community, query "qwen"
+```
+
+Naming a registry implies `--all`, so its recipes appear even if the registry
+is hidden by default. An unknown or disabled registry — whether named via the
+shorthand or `--registry` — is reported as an error listing the available
+registries, rather than silently yielding "No recipes found". Combining a
+conflicting `@scope` with `--registry` is also an error.
+
+### `list` vs `search`
+
+Both scan the same sources; they differ in how duplicates are treated.
+
+- **`list`** shows one row per unqualified name, preferring working-directory
+  recipes.
+- **`search`** shows every copy.
+
+That distinction matters because a registry's recipe directory is scanned
+recursively, so `3x-spark-cluster/foo.yaml` and `4x-spark-cluster/foo.yaml` are
+genuinely different recipes that share a name. Only literal repeats of the same
+file are ever dropped.
 
 ## Show recipe details
 
@@ -81,6 +111,7 @@ Search for recipes by name, model, or description across all registries.
 | `--all` / `-a` | Include recipes from hidden registries |
 | `--runtime` | Filter by runtime (e.g., `vllm`, `sglang`) |
 | `--registry` | Filter by registry name |
+| `--json` | Emit machine-readable JSON instead of the table |
 
 The output table includes:
 
@@ -106,6 +137,17 @@ Check a recipe file for issues:
 - `min_nodes` / `max_nodes` consistency
 - Valid `metadata.model_params` and `metadata.model_dtype`
 - Runtime-specific validation
+
+## Update recipes
+
+```bash
+sparkrun recipe update
+sparkrun recipe update --registry community   # just one
+```
+
+Refreshes the configured recipe registries from git, so newly published
+recipes become resolvable. `sparkrun update` does this too, alongside upgrading
+sparkrun itself.
 
 ## Estimate VRAM usage
 
