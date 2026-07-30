@@ -81,7 +81,8 @@ Four event types are emitted: `run`, `benchmark`, `update`, and
 `setup_wizard`. Each carries a random installation ID plus:
 
 - OS name, OS release, and CPU architecture.
-- **The model identifier** from the recipe (e.g. `Qwen/Qwen3-1.7B`), plus a
+- **The model identifier** from the recipe — but only when it is a repo
+  confirmed publicly readable on HuggingFace (see below) — plus a
   quantization/dtype summary.
 - Runtime, executor, and scheduler names; success/return code; duration;
   whether the run was solo or a dry run.
@@ -98,23 +99,35 @@ Hostnames, IP addresses, SSH usernames, recipe names and paths, registry names,
 and registry URLs are not sent. Emission is best-effort with a sub-second
 timeout, so it never delays or fails a command.
 
-:::caution[Model identifiers are sent as written]
-The recipe's `model` value is sent verbatim. For the usual case — a public
-HuggingFace repo id like `Qwen/Qwen3-1.7B` — that is exactly the signal the
-project wants: which models people actually run.
+### Model identifiers
 
-But the value is not currently filtered by model visibility, so a **private
-repo id** or an **absolute path to weights on local disk** is transmitted as
-written.
+The model name is the one field that could describe your work, so it is
+filtered rather than sent as written. The raw value leaves your machine **only**
+when the repo is confirmed publicly readable on HuggingFace. Otherwise it is
+replaced with a coarse placeholder that records *why* it was withheld, without
+naming anything:
 
-If that applies to only some of your work, suppress those runs individually
-rather than turning telemetry off everywhere:
+| Sent | When |
+|---|---|
+| `Qwen/Qwen3-1.7B` | The repo is public — the signal the project actually wants |
+| `<hf-private>` | The repo is private or gated |
+| `<local-path>` | The model is a path to weights on local disk |
+| `<unknown-visibility>` | Visibility could not be established |
 
-```bash
-SPARKRUN_NO_TELEMETRY=1 sparkrun run my-internal-recipe
-```
+Visibility comes from the Hub's own `private` / `gated` flags, not from whether
+a lookup succeeded. That distinction matters: if you have an `HF_TOKEN`
+configured, your private repos resolve perfectly well, so "it fetched" would
+have been the wrong test.
 
-The rest of your runs keep contributing the signal the project relies on. Reach
-for the [persistent opt-out](#turning-it-off) only if you'd rather not send
-anything at all.
+The check **fails closed**. Offline, rate-limited, a typo'd repo id, or a run
+where model detection was skipped all yield `<unknown-visibility>` rather than
+the name — being unable to check is never treated as permission to send.
+
+Local paths are classified without contacting the Hub at all.
+
+:::note
+This costs no extra network round-trip on a normal run: sparkrun already
+resolves model metadata from the Hub while estimating VRAM for placement. And
+if you have opted out of telemetry, the visibility lookup is skipped
+entirely — you never pay for a request that exists only to serve telemetry.
 :::
