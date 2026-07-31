@@ -15,16 +15,26 @@ Running `sparkrun setup` with no subcommand auto-launches the wizard when no def
 
 ## What the wizard does
 
-The wizard runs six phases in order. Each phase is optional — you can skip any step and come back to it later with the individual `sparkrun setup <command>` subcommands.
+Each phase is optional — you can skip any step and come back to it later with the individual `sparkrun setup <command>` subcommands.
 
 | Phase | What it does | Why it matters |
 |---|---|---|
-| 1. Cluster creation | Saves your DGX Spark hosts by name | So you don't repeat host lists on every command |
+| 0. Install check | Detects whether sparkrun is installed as a uv tool | Installs it if not, so `sparkrun` is on PATH afterwards |
+| 1. Cluster setup | Saves your DGX Spark hosts by name | So you don't repeat host lists on every command |
+| — SSH access | Establishes passwordless control→host SSH | Every later phase assumes it, so it is settled first |
 | 2. SSH mesh | Sets up passwordless SSH between all hosts | Required for sparkrun to orchestrate containers remotely |
 | 3. CX7 networking | Configures high-speed ConnectX-7 interfaces | Enables fast NCCL communication and data transfers between nodes |
+| 3b. SSH re-mesh | Re-runs the mesh when CX7 changed any IPs | Keeps every interface reachable, automatically |
 | 4. Docker group | Adds your user to the `docker` group | So you can run containers without sudo |
+| 4b. NVIDIA CDI | Generates `/etc/cdi/nvidia.yaml` | sparkrun requests GPUs via CDI, so containers get no GPU without it |
 | 5. Sudoers entries | Installs scoped sudo rules | Allows automatic cache permission fixes and page cache clearing |
 | 6. earlyoom | Installs OOM protection | Prevents system hangs when models approach the 128 GB memory limit |
+
+:::tip[Already set up?]
+`sparkrun setup check` probes an existing cluster against these same steps
+without changing anything, and reports what is missing. Use it to verify a
+cluster before a first run, or to find what drifted after one.
+:::
 
 ## Before you begin
 
@@ -33,7 +43,7 @@ You'll need:
 - The IP address or hostname of your DGX Spark system(s)
 - SSH access to each Spark (you'll be prompted for passwords during setup)
 
-## Phase 1: Cluster creation
+## Phase 1: Cluster setup
 
 The wizard starts by discovering your DGX Sparks and creating a named cluster.
 
@@ -78,6 +88,37 @@ Pick any name you like. The **first host** in the list becomes the head node for
 
 :::note
 If you already have a cluster configured, the wizard offers to reuse it instead of creating a new one.
+:::
+
+### SSH access
+
+Immediately after the cluster name and SSH username prompts — and before any
+other phase touches a host — the wizard makes sure it can actually reach them:
+
+```
+Checking SSH access to 2 host(s)...
+  10.24.11.13  reachable, key accepted
+  10.24.11.14  reachable, password auth (no key installed)
+
+Install an SSH key on 10.24.11.14? [Y/n]: y
+```
+
+Every later phase assumes passwordless control→host SSH, so settling it first
+turns "the wizard failed halfway through" into a single answerable question.
+
+The probe distinguishes three outcomes, and only the first is offered a key:
+
+- **Reachable but rejecting the key** — a bootstrap candidate; the wizard offers to install one, generating `~/.ssh/sparkrun_ed25519` if you have no identity yet.
+- **Host key changed** — never auto-fixed. This can indicate a genuinely different machine, so you resolve it yourself.
+- **Unreachable** — a network or `sshd` problem, not something a key installation would solve.
+
+Success is confirmed by re-probing rather than by trusting the install
+command's exit code.
+
+:::note[Windows control machines]
+This phase needs only `ssh` and `ssh-keygen`, both shipped with Windows 10+ —
+no local `bash`. Key material travels over stdin rather than the command line,
+so it can't be mangled by shell quoting.
 :::
 
 ## Phase 2: SSH mesh
@@ -140,6 +181,32 @@ Add 'dgxuser' to the docker group on all hosts? [Y/n]: y
 
 sparkrun runs Docker commands over SSH. Your user needs to be in the `docker` group on each Spark to run containers without sudo. This phase checks and fixes group membership automatically.
 
+## Phase 4b: NVIDIA CDI
+
+```
+Phase 4b: NVIDIA CDI (Container Device Interface)
+------------------------------
+Generates /etc/cdi/nvidia.yaml so Docker can access the GPU(s).
+Generate the NVIDIA CDI spec on all hosts? [Y/n]: y
+```
+
+sparkrun requests GPUs as `--device nvidia.com/gpu=all`, which Docker resolves
+through `/etc/cdi/nvidia.yaml`. Without that spec a container starts but sees
+no GPU, so this phase runs `nvidia-ctk cdi generate` on each host.
+
+The script skips itself where `nvidia-ctk` is absent, so a host without the
+NVIDIA Container Toolkit reports as skipped rather than failing the wizard.
+
+:::caution[Regenerate after a driver upgrade]
+The spec pins absolute paths to versioned driver libraries. An NVIDIA driver
+update moves them, leaving a spec that resolves to nothing — and containers
+that fail with `unresolvable CDI devices`.
+
+`sparkrun setup check` flags this: it counts how many referenced paths still
+exist and warns when any are missing. See
+[GPU not visible in containers](/getting-started/troubleshooting/#gpu-not-visible-in-containers-missing-cdi-spec).
+:::
+
 ## Phase 5: Sudoers entries
 
 ```
@@ -185,6 +252,7 @@ Setup Complete!
   CX7:        configured (192.168.11.0/24, 192.168.12.0/24)
   SSH remesh: OK
   Docker:     OK (2/2)
+  CDI:        OK (2/2)
   Sudoers:    installed (fix-permissions, clear-cache)
   earlyoom:   installed
 
@@ -211,9 +279,14 @@ You can configure skipped steps later with the individual commands:
 |---|---|
 | SSH mesh | `sparkrun setup ssh` |
 | CX7 networking | `sparkrun setup cx7` |
-| Docker group | (manual: `sudo usermod -aG docker $USER`) |
+| Docker group | `sparkrun setup docker-group` |
+| NVIDIA CDI | `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (on each host) |
 | Sudoers | `sparkrun setup fix-permissions --save-sudo` and `sparkrun setup clear-cache --save-sudo` |
 | earlyoom | `sparkrun setup earlyoom` |
+
+To see which of these a cluster is still missing, run `sparkrun setup check` —
+it probes every host non-destructively and names the command that fixes each
+gap.
 
 ## Non-interactive mode
 
