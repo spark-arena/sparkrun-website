@@ -279,11 +279,75 @@ sudo apt-get update && sudo apt-get install -y rsync git
 
 ## Verifying RDMA performance
 
-Once networking is configured, use the `perftest` package to verify RDMA bandwidth and latency.
+Once networking is configured, verify that the fabric actually carries traffic:
 
-### Bandwidth test
+```bash
+sparkrun setup features enable cli.setup.rdma_test   # experimental; enable once
+sparkrun setup rdma-test --cluster mycluster
+```
 
-On the receiver node:
+The command derives host pairs from the CX-7 subnets it configured, so it only tests links that
+physically exist. For each link it measures latency and bandwidth, then drives **every link between
+a host pair at once** — a DGX Spark QSFP112 cable presents as two RDMA devices, and testing them one
+at a time reports half the cable's real throughput.
+
+```
+h1 <-> h2 (2 links)
+    [OK]   h1:rocep1s0f0 <-> h2:rocep1s0f0 (192.168.11.0/24) — lat 3.02 us, bw 111.7 Gb/s, of 100 Gb/s
+    [OK]   h1:roceP2p1s0f0 <-> h2:roceP2p1s0f0 (192.168.12.0/24) — lat 3.32 us, bw 111.7 Gb/s, of 100 Gb/s
+           aggregate (all links concurrently) — 195.7 Gb/s of 200 Gb/s
+
+Results: 2 OK.
+```
+
+Expect roughly **100 Gbps** per RDMA device and close to **200 Gbps** aggregate across the cable.
+
+Note what the per-device expectation is measured against. On DGX Spark the NIC exposes **two PCIe
+functions on a single physical port**, so both devices share one 200 Gbps wire; each is compared
+against its fair share of that port, not against the port's whole rate. sparkrun detects this from
+the hardware — devices reporting the same `sys_image_guid` *and* `phys_port_name` share a wire — so
+a conventional dual-port card with two cables is still treated as additive.
+
+Underperformance is reported as a warning; only a test that could not run at all fails the command,
+so it is safe to gate a script on the exit status.
+
+### Adding the NCCL collective
+
+`--suite all` additionally runs an nccl-tests collective, which is the number that actually predicts
+multi-node inference performance. It fetches the test image onto every host and takes several
+minutes, which is why it is not the default:
+
+```bash
+sparkrun setup rdma-test --cluster mycluster --suite all
+```
+
+```
+  [OK]   NCCL all_gather_perf (16G) across 2 host(s) — avg bus bandwidth 23.53 GB/s
+```
+
+This needs passwordless **host-to-host** SSH across the cluster (`sparkrun setup ssh-mesh`), because
+mpirun reaches each peer through the host's own sshd before stepping into its container.
+
+### Useful options
+
+| Option | Effect |
+| --- | --- |
+| `--suite all` | Add the NCCL collective (pulls the image; takes minutes) |
+| `--suite nccl` | The collective only |
+| `-D 30` | Longer bandwidth runs (default 10 seconds) |
+| `--size 4G` | Smaller NCCL message size |
+| `--json` | Machine-readable results |
+| `--dry-run` | Show which links would be tested, without sending traffic |
+
+The `perftest` suite runs `ib_write_bw` / `ib_write_lat` straight from the host, which DGX OS ships
+preinstalled. The NCCL suite needs a container image
+(`ghcr.io/spark-arena/sparkrun-rdma-test`) because it bundles NCCL and nccl-tests, which otherwise
+take about ten minutes to build on every node. Point `--image` at a mirror if your nodes cannot
+reach GHCR.
+
+### Running the tests by hand
+
+The same measurements, without sparkrun. On the receiver node:
 
 ```bash
 ib_write_bw -d rocep1s0f1 --report_gbits -q 4 -R --force-link IB
@@ -295,23 +359,16 @@ On the sender node:
 ib_write_bw 192.168.11.14 -d rocep1s0f1 --report_gbits -q 4 -R --force-link IB
 ```
 
-You should see approximately **100 Gbps** per RoCE interface. With both twins active via NCCL, aggregate bandwidth approaches 200 Gbps.
-
-### Latency test
-
-On the receiver node:
+And for latency, on the receiver then the sender:
 
 ```bash
 ib_write_lat -d rocep1s0f1 --report_gbits -R --force-link IB
-```
-
-On the sender node:
-
-```bash
 ib_write_lat 192.168.11.14 -d rocep1s0f1 --report_gbits -R --force-link IB
 ```
 
-Typical latency between two directly connected Sparks is approximately **1.5 microseconds**.
+You should see approximately **100 Gbps** per RoCE interface and **1.5 microseconds** of latency.
+Note that a single `ib_write_bw` run exercises one of the two RDMA devices, so it reports about half
+the cable's capacity; with both twins active via NCCL, aggregate bandwidth approaches 200 Gbps.
 
 ## Resource transfer modes
 

@@ -66,10 +66,16 @@ Probes each host for the things the wizard configures and reports gaps —
 or to find what drifted after one.
 
 Checks, in order: `docker_installed`, `docker_group`, `docker_usable`,
-`nvidia_ctk`, `cdi_spec`, `earlyoom`, `sudoers`, `ssh_mesh`, `cx7`.
+`nvidia_ctk`, `cdi_spec`, `host_ipc`, `earlyoom`, `sudoers`, `ssh_mesh`, `cx7`,
+`rdma`.
 
 Each result is `OK`, `WARN`, `FAIL`, or `SKIP`, and a non-OK result names the
 command that would fix it. `--json` emits the same results machine-readably.
+
+The `rdma` check reports whether the RDMA devices are present and `ACTIVE`. It
+never sends traffic over the fabric — "the link is configured" and "the link
+performs" are different questions, and the second one is
+[`sparkrun setup rdma-test`](#rdma-performance-test).
 
 ## Feature flags
 
@@ -178,6 +184,68 @@ sparkrun setup cx7 --cluster mylab --force
 :::note
 `--subnet1` and `--subnet2` must be specified together. See the [Networking Best Practices](/getting-started/networking/) guide for subnet selection guidance, verification steps, and manual configuration instructions.
 :::
+
+## RDMA performance test
+
+```bash
+sparkrun setup rdma-test [options]
+```
+
+Measures what `setup cx7` configured: RDMA latency and bandwidth per link, and optionally an NCCL
+collective across the cluster. Host pairs are derived from the configured CX-7 subnets, so only
+links that physically exist are tested.
+
+By default it runs the **`perftest` suite only** — host-native on DGX OS, no image pull, done in
+seconds. Add `--suite all` for the NCCL collective, which fetches the test image onto every host and
+takes several minutes.
+
+:::caution
+Experimental — gated behind the `cli.setup.rdma_test` feature flag:
+
+```bash
+sparkrun setup features enable cli.setup.rdma_test
+```
+
+Unlike `setup check`, this command sends real traffic and takes a few minutes.
+:::
+
+```bash
+sparkrun setup rdma-test --cluster mylab
+sparkrun setup rdma-test --cluster mylab --suite all
+sparkrun setup rdma-test --cluster mylab --dry-run
+sparkrun setup rdma-test --hosts 10.24.11.13,10.24.11.14 --json
+```
+
+| Option | Description |
+|---|---|
+| `--hosts` / `-H` | Comma-separated host list |
+| `--hosts-file` | File with hosts (one per line, `#` comments) |
+| `--cluster` | Use a saved cluster definition |
+| `--user` / `-u` | SSH username |
+| `--suite` | `perftest`, `nccl`, or `all` (default: `perftest`) |
+| `--image` | Test container image (default: the pinned sparkrun image) |
+| `--duration` / `-D` | Seconds per bandwidth test (default: `10`) |
+| `--size` | NCCL message size (default: `16G`) |
+| `--queue-pairs` / `-q` | perftest queue pairs (default: `4`) |
+| `--gid-index` | Force a RoCE GID index (normally automatic) |
+| `--link-type` | perftest `--force-link`: `IB`, `Ethernet`, or `auto` |
+| `--force-container` | Use the image even when perftest is on the host |
+| `--keep-containers` | Leave test containers running for debugging |
+| `--json` | Emit the full results as JSON |
+| `--dry-run` / `-n` | Show which links would be tested, without sending traffic |
+
+Each host pair is measured link by link and then with **all its links driven concurrently** — on DGX
+Spark a single QSFP112 cable presents as two RDMA devices, so a per-device figure is about half the
+cable's real throughput.
+
+**Tooling.** The `perftest` suite runs `ib_write_bw` / `ib_write_lat` from the host, which DGX OS
+ships preinstalled, so it pulls no image. The `nccl` suite needs
+`ghcr.io/spark-arena/sparkrun-rdma-test`, which bundles NCCL and nccl-tests; its tag tracks the NCCL
+release it was built from. Use `--image` to point at a mirror.
+
+**Exit status.** Underperformance is a warning and exits `0`; only a test that could not run at all
+is a failure and exits `1`. See [Networking Best Practices](/getting-started/networking/) for the
+numbers to expect.
 
 ## Fix cache permissions
 
