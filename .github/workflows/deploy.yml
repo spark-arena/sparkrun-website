@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Fork PRs get a read-only token and no access to repository secrets, so they
+# can validate the build but never publish.
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,7 +36,7 @@ jobs:
         run: npm run build
 
       - name: Deploy
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
