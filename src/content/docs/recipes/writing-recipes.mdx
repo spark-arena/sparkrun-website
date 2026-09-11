@@ -5,7 +5,9 @@ description: How to create your own sparkrun recipes.
 
 ## Start from an existing recipe
 
-The easiest way to create a new recipe is to copy one that uses the same runtime and modify it.
+The easiest way to create a new recipe is to copy one that uses the same runtime and modify it. Sparkrun will see any recipes in the current directory and can check and run them.
+
+For more complex recipes involving [mods](recipes/format/#mods), [tunings](cli/tune/), or [benchmarks](cli/benchmark/#benchmark-profiles), it is recommended to first review the Sparkrun [security model](advanced/security/) so you can be aware of important limitations and caveats, and then set up your own [recipe registry](recipes/registries/).
 
 ```bash
 # See what's available
