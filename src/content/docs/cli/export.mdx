@@ -11,7 +11,10 @@ The `export` command group provides tools for exporting recipes in various forma
 sparkrun export recipe <recipe> [options]
 ```
 
-Export a normalized recipe to stdout or a file.
+Export a normalized recipe to stdout or a file. Includes are flattened by default,
+while conditional overrides remain available for future launches. Use
+`--keep-include` to retain the original base reference and child settings, or
+`--realize` to resolve the recipe for selected hardware.
 
 ### Options
 
@@ -19,6 +22,12 @@ Export a normalized recipe to stdout or a file.
 |---|---|
 | `--json` | Output as JSON instead of YAML |
 | `--save <path>` | Save to a file instead of printing to stdout |
+| `--keep-include` | Preserve the original `include:` reference and child settings |
+| `--realize` | Plan for selected hardware and bake in matching conditional and CLI overrides |
+| `--hosts` / `-H`, `--hosts-file`, `--cluster` | Target selection for `--realize`; otherwise use the default cluster |
+| `--tp`, `--pp`, `--dp`, `--gpu-mem`, `--max-model-len`, `--image`, `-o` | Recipe overrides for `--realize` |
+| `--no-pin` | With `--realize`, retain image/model references as written |
+| `--offline` / `--online` | With `--realize`, select resident/cached or online pin sources; defaults to the cluster policy |
 
 ### Examples
 
@@ -32,6 +41,45 @@ sparkrun export recipe qwen3-1.7b-vllm --save my-recipe.yaml
 # Export as JSON
 sparkrun export recipe qwen3-1.7b-vllm --json
 ```
+
+### Realize for selected hardware
+
+Realization probes the hosts and plans placement as `run` would, then exports a
+plain recipe with matching `overrides:` and CLI settings baked into it. It starts
+no inference workload. Platform defaults remain platform defaults and are applied
+again at launch. `metadata.realized_for` records the selected hardware and node
+count without host names.
+
+```bash
+# Resolve conditional settings and pin artifacts for this cluster.
+sparkrun export recipe my-recipe --realize --cluster mylab --tp 2 --save realized.yaml
+
+# Capture the versions already available on the selected hosts.
+sparkrun export recipe my-recipe --realize --cluster mylab --offline --save resident.yaml
+
+# Bake in settings while retaining the original image/model references.
+sparkrun export recipe my-recipe --realize --cluster mylab --no-pin
+
+# Keep a child recipe's include instead of flattening it.
+sparkrun export recipe child.yaml --keep-include --save child-copy.yaml
+```
+
+By default, container references are pinned to registry digests and the primary
+model to a Hugging Face commit. `metadata.pinned` records the references replaced
+and their provenance. Offline pinning uses resident images and cached models;
+selected hosts must agree on image content. A matching controller image can
+supply a missing registry digest, and the controller cache can supply model
+metadata when absent on a target.
+
+Pinning has limits: locally built images can require `--no-pin`, and a separate
+draft model in `speculative_config.model` is reported but not pinned. Inspect
+the export diagnostics for unresolved or unpinned assets. Online image lookup
+uses anonymous access or inline Docker credentials; it does not invoke Docker
+credential helpers.
+
+Host selection, recipe overrides, and pinning flags require `--realize`.
+`--keep-include` cannot be combined with `--realize`, and `--offline` cannot be
+combined with `--no-pin`.
 
 ## export running-recipe
 

@@ -3,7 +3,10 @@ title: Builders
 description: Container image builders, sentinel images, configuration defaults, and the builder plugin interface.
 ---
 
-Builders prepare container images before sparkrun distributes them to target hosts and launches the runtime. They run during [Phase 2 of the launch lifecycle](/developer-reference/execution-flow/#phase-2-building-image).
+Builders prepare container images or native host environments. They run during
+[Phase 2 of the launch lifecycle](/developer-reference/execution-flow/#phase-2-building-image),
+or independently through [`sparkrun build`](/cli/build/) to prepare assets before
+starting inference.
 
 The default `docker-pull` preparation leaves the image reference unchanged because distribution owns pulls. `--rebuild` forces a fresh pull, including this default path. The `eugr` builder is the main "real" builder, used for the eugr/spark-vllm-docker family of images.
 
@@ -24,6 +27,36 @@ it is now the exception rather than the common path.
 |---|---|---|
 | `docker-pull` | Default preparation leaves the image reference unchanged; distribution pulls it. `--rebuild` forces a fresh registry pull. | All recipes without an explicit `builder` field. |
 | `eugr` | Resolves [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) images. Pulls a prebuilt image by default; runs `build-and-copy.sh` only when `build_args` request a wheels or custom build. The builder does **not** handle `mods` — those are resolved and expanded into `pre_exec` entries by Phase 1, builder-agnostic (see [Recipes › Mods](/recipes/format/#mods) for the full mods spec). | Recipes with `builder: eugr`, recipes using a recognized eugr `:latest` image (sentinel images, auto-detected), or recipes with `build_args`. The presence of `mods` alone also triggers it for backward compatibility with the original eugr-centric workflow. |
+
+### Native environments with uv-venv
+
+The bundled `uv-venv` builder (alias `venv`) pairs with `executor: local`. It
+installs dependencies with uv and writes an activation file that the local
+executor automatically sources. It requires `builder.uv_venv` and
+`executor.local`; see [Feature Flags](/advanced/feature-flags/).
+
+```yaml
+builder: uv-venv
+executor: local
+builder_config:
+  python: "3.12"
+  requirements_file: requirements.txt
+  torch_backend: auto
+  verify_only: true
+```
+
+This fragment expects an already-prepared environment matching the requested
+dependencies. `verify_only: true` refuses to install missing or changed
+dependencies; omit it or use `false` for initial provisioning. Reuse checks the
+environment's Python executable and dependency-hash marker, not a full audit of
+installed packages.
+
+Requirements can also come from an inline `requirements` list or a `pyproject`
+file. File paths resolve on the controller relative to the recipe, and their
+contents contribute to the environment hash. `venv_path` and `env_file` can
+override generated locations; `cuda_home` supplies a CUDA toolkit path.
+An offline launch requires uv to exist and restricts dependency acquisition to
+local files/caches. See [build](/cli/build/) for preparation-only behavior.
 
 ## When a build actually happens
 

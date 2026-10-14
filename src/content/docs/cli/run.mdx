@@ -78,6 +78,34 @@ zeros. See [recipe readiness](/recipes/format/#readiness).
 Use `-o key=value` to override recipe defaults — that is the supported way to
 pass engine-level settings through to the serve command.
 
+## Offline launches
+
+Use `--offline` when recipes, images, and model files are already available:
+
+```bash
+sparkrun run my-recipe --cluster mylab --offline
+
+# Make offline operation the cluster default.
+sparkrun cluster update mylab --offline
+
+# Allow online acquisition for one run, or restore the cluster's online default.
+sparkrun run my-recipe --cluster mylab --online
+sparkrun cluster update mylab --online
+```
+
+Offline mode permits copying existing images and models within the cluster,
+but skips internet acquisition and registry refreshes. Missing required assets
+produce a preflight error. Cache the recipe registry, images, models, and any
+required tools ahead of time. Connectivity failures do not automatically switch
+the launch into offline mode.
+
+`--offline` / `--online` override the saved cluster policy for that operation.
+The same choices apply to `benchmark` and `proxy load`; offline benchmarking
+also needs its framework and evaluation assets already available.
+`--no-auto-detect` only skips metadata estimation and is not an offline policy.
+See [Model Cache Management](/advanced/cache-management/) for cache validation
+and [export](/cli/export/#realize-for-selected-hardware) for offline pinning.
+
 ## Recipe sources
 
 The `<recipe>` argument can be:

@@ -4,7 +4,7 @@
   "release_status": "prepared for 0.4.0 release; publication and portable-platform checks remain release gates",
   "scope": {
     "existing_pages": 53,
-    "new_pages": 13
+    "new_pages": 16
   },
   "review_groups": {
     "getting-started": {
@@ -205,6 +205,11 @@
       "page": "cli/benchmark.mdx",
       "group": "cli",
       "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/build.mdx",
+      "group": "cli",
+      "status": "added"
     },
     {
       "page": "cli/cluster-commands.mdx",
@@ -417,6 +422,11 @@
       "status": "reviewed-updated"
     },
     {
+      "page": "recipes/legacy-v1.mdx",
+      "group": "recipes",
+      "status": "added"
+    },
+    {
       "page": "recipes/registries.mdx",
       "group": "recipes",
       "status": "reviewed-updated"
@@ -435,6 +445,11 @@
       "page": "runtimes/llama-cpp.mdx",
       "group": "runtimes",
       "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/modular-max.mdx",
+      "group": "runtimes",
+      "status": "added"
     },
     {
       "page": "runtimes/overview.mdx",
@@ -483,11 +498,11 @@
     }
   ],
   "validation": {
-    "contracts": "35 Python fences, 57 imports, 6 option constructors, 534 CLI examples; all six stable/beta/alpha and advanced off/on combinations pass against cf5e16b9a44079288fd0a712e240d250a3f69b07. Installed fixtures verify lazy/console-free initialization, command callbacks with a stubbed host probe, registry and recipe behavior, benchmark/setup/runtime contracts, literal manifests, lifecycle plan idempotence, plugin diagnostic ownership/redaction, disabled builders, nested capture, and closed reporters. Network and subprocess calls remain denied.",
+    "contracts": "35 Python fences, 57 imports, 6 option constructors, 562 CLI examples; all six stable/beta/alpha and advanced off/on combinations pass against cf5e16b9a44079288fd0a712e240d250a3f69b07. Installed fixtures verify lazy/console-free initialization, command callbacks with a stubbed host probe, registry and recipe behavior, benchmark/setup/runtime contracts, literal manifests, lifecycle plan idempotence, plugin diagnostic ownership/redaction, disabled builders, nested capture, and closed reporters. Network and subprocess calls remain denied.",
     "core_documentation_tests": "73 passed during the initial review; behavioral tests listed by group were reviewed, not run against live systems.",
     "astro": "Type/content check: zero errors, warnings or hints. Production build succeeds.",
-    "links": "7052 internal links/anchors across 68 HTML pages and 65 sidebar entries. Earlier external source/community/license checks are historical and do not assert remote availability of the updated source pin.",
-    "browser": "32 checks across eight updated pages at 1440px/390px in light/dark themes: Plugin Development, Diagnostics API, Logging API, Daemon API, Managed Plugins, Feature Flags, Diagnostics, and What’s New. No page overflow or browser errors; verified new anchors, all 92 expandable bundled operations, diagnostic fields, and absence of external plugin coverage in Daemon API. Desktop plugin and mobile diagnostics screenshots inspected. Artifacts: /tmp/sparkrun-docs-review/plugin-sync-browser.json and sync-*.png. Earlier reviews cover the homepage, footer, runtime and cache pages.",
+    "links": "7602 internal links/anchors across 71 HTML pages and 68 sidebar entries. Earlier external source/community/license checks are historical. The supplied OCI Relay blog link returned HTTP 200; the lil launcher repository was also read during this update.",
+    "browser": "32 checks across eight updated pages at 1440px/390px in light/dark themes: Plugin Development, Diagnostics API, Logging API, Daemon API, Managed Plugins, Feature Flags, Diagnostics, and What\u2019s New. No page overflow or browser errors; verified new anchors, all 92 expandable bundled operations, diagnostic fields, and absence of external plugin coverage in Daemon API. Desktop plugin and mobile diagnostics screenshots inspected. Artifacts: /tmp/sparkrun-docs-review/plugin-sync-browser.json and sync-*.png. Earlier reviews cover the homepage, footer, runtime and cache pages.",
     "limitations": [
       "No live cluster, SSH rotation, plugin acquisition or exposed daemon used for validation.",
       "No deployment performed."
@@ -498,6 +513,10 @@
     "arena_cli": "Replaced benchmark submission examples with sparkrun benchmark <recipe> --arena throughout both tutorials and the CLI overview/reference. Arena group guidance covers login/logout/status. Documented standard resume-by-ID for upload retry. All six contract configurations, production build, internal links, and four mobile local-preview pages pass. No authentication, workloads, or uploads performed. Artifacts: /tmp/sparkrun-docs-review/arena-*.txt and arena-browser.json.",
     "benchmark_failure_policy": "Checked current CLI declaration and changelog: the failure-policy controls are unconditionally hidden, while current default behavior remains stop-on-task-failure. Removed the controls entirely from tutorial/reference prose, option tables, and generated daemon argument tables per user direction. Guidance now describes failure and resume behavior without advertising those controls. Build, internal links, generator comparison and local preview checked; no benchmark executed.",
     "cache_title": "Page title, sidebar, and incoming link labels now read Model Cache Management; the /advanced/cache-management/ route and anchors are preserved. Build/internal links and mobile local preview checked.",
-    "gateway_selection": "Reviewed current core cd21f802, plugin manager/lifecycle restrictions, and the installed SparkRoute manifest/selection hook. Install --enable controls loading; explicit capability enable persists gateway selection. Updated the proxy setup and LiteLLM switch-back examples accordingly. Three focused lifecycle regressions pass against the pinned reference, including installation preserving capabilities/selection and explicit feature enable selecting even when already on. All six website contract configurations, build, links, and desktop/mobile local previews pass. No installed plugin state or running gateway was changed."
+    "gateway_selection": "Reviewed current core cd21f802, plugin manager/lifecycle restrictions, and the installed SparkRoute manifest/selection hook. Install --enable controls loading; explicit capability enable persists gateway selection. Updated the proxy setup and LiteLLM switch-back examples accordingly. Three focused lifecycle regressions pass against the pinned reference, including installation preserving capabilities/selection and explicit feature enable selecting even when already on. All six website contract configurations, build, links, and desktop/mobile local previews pass. No installed plugin state or running gateway was changed.",
+    "release_highlights": "Compared v0.3.10 with core cd21f802 and checked additions against the pinned cf5e16b reference. Expanded release highlights for reusable recipes, offline launches and realized exports, build preparation, proxy services, setup reruns, persistent GPU assignments, Docker io_uring defaults, SGLang FP8 tuning, and the lil launcher catalog adapter. Added the requested OCI Relay blog link and removed the unrelated model-cache cross-reference. Updated recipe/export/build/proxy/tune/registry/cluster guides. No upstream code changed.",
+    "runtime_flags": "254 mappings across six runtime references generated and checked from static core flag maps with scripts/sync-runtime-flags.py. Documented special boolean, JSON, alias, topology, and engine-image restrictions. 13 complete defaults-only YAML examples exercised against pure command generation, including vLLM/Ray, SGLang, llama.cpp, TensorRT-LLM, Atlas, and Modular MAX. Include/override/environment-template/version examples also exercised with network and child processes denied. Recipe Format recommends command only for unusual unmapped flags and omits the recipe scheduler field.",
+    "legacy_recipes": "Documented recipe_version with v2 as the default and v1 as legacy eugr run-recipe format. Added a legacy reference and verified its example, v1 builder/runtime/topology resolution, export retaining version 1, and conversion to a defaults-only v2 recipe.",
+    "release_highlights_browser": "30 checks across 15 updated/new pages at 1440px and 390px; HTTP 200, no page overflow or page errors. Verified recipe_version/command headings, supplied OCI Relay and lil links, and visually inspected OCI Relay, recipe command guidance, and Atlas flag presentation. Artifacts: /tmp/sparkrun-docs-review/release-highlights-browser.json and recipe-command-*, whats-new-oci-*, atlas-flags-*, atlas-table-390.png. Local dev preview remains at http://localhost:4324/."
   }
 }

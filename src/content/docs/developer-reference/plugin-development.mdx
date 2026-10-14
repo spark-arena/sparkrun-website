@@ -152,9 +152,14 @@ Registries can carry more than recipes:
 | `benchmark_subpath` | Benchmark profiles; leave empty if absent |
 | `mods_subpath` | Shared recipe mods; leave empty if absent |
 | `enabled` | Whether the registry can participate in resolution |
-| `visible` | Whether its recipes appear in default listings; `False` still allows qualified references while enabled |
+| `visible` | Controls stemless access: `True` includes recipes in default listings and allows recipe names without an `@registry/` stem; `False` requires the stem while enabled |
 | `format` | Recipe format selector; defaults to `sparkrun`, or names a [registered format](#other-recipe-formats) |
 | `trusted` | Standing permission for executable recipe hooks, subject to loader provenance |
+
+`sparkrun registry list` displays `visible` as **Stemless**. A non-stemless
+registry still supports qualified references such as
+`@example-hardware/my-recipe`; users can discover its recipes with
+`sparkrun list @example-hardware` or `sparkrun list --all`.
 
 These declarations are an in-memory overlay. Registration validates names and
 paths but does not fetch anything or edit `registries.yaml`. Disabling or

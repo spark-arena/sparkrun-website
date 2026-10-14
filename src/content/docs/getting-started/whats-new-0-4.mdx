@@ -1,11 +1,11 @@
 ---
 title: What's New in 0.4.0
-description: OCI Relay image distribution, managed plugins, readiness-aware launches, an optional daemon, and API changes in sparkrun 0.4.0.
+description: OCI Relay, reusable recipes, offline launches, managed plugins, daemon services, and other changes since sparkrun 0.3.10.
 ---
 
 sparkrun 0.4.0 brings OCI Relay image distribution, managed plugin installation,
 an optional daemon, and more visibility into startup, model caches, and benchmarks. It also changes the Python
-and plugin APIs.
+and plugin APIs. These highlights cover changes since 0.3.10.
 
 ## Startup waits for readiness
 
@@ -16,6 +16,35 @@ Startup timing reports show the observations supported by the runtime and execut
 
 A failed readiness check or Ctrl+C can leave the detached workload running.
 See [run](/cli/run/#readiness-and-exit-status) for lifecycle and exit behavior.
+
+## Reusable recipes and hardware-specific settings
+
+Recipes can use `include:` to extend another recipe and conditional `overrides:`
+to select settings for the hardware, runtime, or parallelism of a launch.
+Explicit environment templates can reference effective configuration and prepared
+model paths, node ranks, and runtime caches. Authors can declare
+`min_sparkrun_version` to catch incompatible core versions before preparation.
+See [Recipe Format](/recipes/format/#recipe-inheritance).
+
+## Offline launches and reproducible exports
+
+`run`, `benchmark`, and `proxy load` accept `--offline` to reuse existing recipes,
+images, and models, including copies within the cluster. Clusters can save an
+offline default; `--online` overrides it for one operation.
+
+`sparkrun export recipe --realize` resolves a recipe against selected hardware
+and bakes in matching overrides. It pins container digests and the primary model
+revision by default, with an offline mode for resident artifacts. See
+[Offline launches](/cli/run/#offline-launches) and
+[Realized exports](/cli/export/#realize-for-selected-hardware) for requirements
+and pinning limits.
+
+## Prepare assets before launching
+
+The new advanced `sparkrun build` command prepares images, model files, tuning
+configurations, and native environments without starting inference. It prepares
+all selected hosts, including hosts whose GPUs are busy, and retains completed
+work for reuse. See [build](/cli/build/) for its scope and options.
 
 ## Managed plugins
 
@@ -33,6 +62,11 @@ use static manifests and lifecycle hooks to plan settings for management actions
 See [Managed Plugins](/advanced/plugins/) for controls, updates, and rollback, and
 [Plugin Development](/developer-reference/plugin-development/) for manifests and
 extension examples.
+
+The bundled, opt-in `lil` plugin reads the catalog used by the
+[lil launcher](https://github.com/local-inference-lab/lil): launch `@lil/<Entry>`
+directly or export it as a sparkrun recipe. It defaults on only for alpha.
+See [The lil catalog](/recipes/registries/#the-lil-catalog).
 
 ## Container image distribution with OCI Relay
 
@@ -53,8 +87,8 @@ relay and coordinates image delivery to Linux Docker hosts automatically.
 sparkrun downloads and verifies the required relay binaries, then stages them to
 execution hosts; those hosts do not need internet access for relay installation.
 Cached binaries and resident source images can support offline distribution.
-See [Model Cache Management](/advanced/cache-management/) for transfer validation and
-offline behavior.
+For more background, read the
+[OCI Relay blog discussion](https://blog.spark-arena.com/posts/4-oci-relay/oci-relay/).
 
 ## Shared diagnostics and workload logs
 
@@ -77,11 +111,28 @@ to `gpu_access_mode: gpus`; CDI setup applies when selected or required.
 Read-only checks can report duplicate SSH server host keys and machine IDs.
 A separate, explicitly confirmed rotation workflow handles remediation.
 
+Wizard reruns reuse working SSH meshes and saved CX7 topology, prompting when a
+configuration change is needed. Setup also handles different sudo passwords
+per host and reuses accepted credentials for the rest of the command.
+
 DGX Spark's scheduling cap is now 0.90. The default vLLM/SGLang serving utilization
 is 0.80 when the recipe and overrides leave it unset. These settings serve different
 purposes; explicit recipe memory settings still take precedence for the engine.
+GPU reservations persist across Docker/native workload observations, and launches
+are bound to their assigned devices. Ordinary workloads reserve GPUs exclusively.
 See the [Setup Wizard](/getting-started/setup-wizard/),
 [SSH Setup](/getting-started/ssh-setup/), and [Schedulers](/advanced/schedulers/).
+
+Docker launches now default to a bundled seccomp profile that allows io_uring.
+Custom profiles and explicit policies remain available; see
+[Docker launch defaults](/advanced/executors/#docker-launch-defaults).
+
+## Proxy services
+
+`sparkrun proxy systemd` installs, inspects, and uninstalls a persistent gateway
+service on Linux. Normal proxy start/stop commands use the installed unit, and
+foreground supervision follows the gateway across managed restarts. See
+[Proxy service management](/cli/proxy/#run-as-a-systemd-service).
 
 ## Optional daemon
 
@@ -114,6 +165,13 @@ invented percentage. Measurement results are retained when export or publication
 fails, so finalization can be retried without repeating measurements.
 See [Benchmarking Models](/tutorials/benchmarking/) and
 [Benchmark API](/developer-reference/benchmark-api/).
+
+## SGLang dense FP8 tuning
+
+`sparkrun tune sglang --mode fp8` tunes dense block-FP8 kernels using explicit
+per-rank weight shapes. Compatible saved configurations are installed into
+future Docker serving containers. See [SGLang FP8 tuning](/cli/tune/#dense-fp8-tuning)
+for shape selection and launch behavior.
 
 ## Breaking Python and plugin API changes
 

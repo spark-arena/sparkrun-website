@@ -9,7 +9,7 @@ sparkrun ships with several default registries and supports adding custom ones. 
 
 sparkrun includes the following registries out of the box:
 
-| Registry | Source | Visible | Description |
+| Registry | Source | Stemless | Description |
 |---|---|---|---|
 | `@official` | [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) | Yes | Vetted recipes from Spark Arena. Tested and reviewed for correctness. |
 | `@eugr` | [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) | Yes | Recipes from the eugr/spark-vllm-docker repository. |
@@ -19,7 +19,13 @@ sparkrun includes the following registries out of the box:
 | `@atlas` | [Atlas-Inf/sparkrun-recipes](https://github.com/Atlas-Inf/sparkrun-recipes) | No | Official Atlas recipe registry (bundled as a default in sparkrun v0.2.31+). See the [Atlas runtime docs](/runtimes/atlas/) for details. |
 | `@sparkrun-testing` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | No | Internal testing registry with recipes, tuning configs, and benchmark profiles. |
 
-**Visible** registries appear in `sparkrun list` and `sparkrun search`. Hidden registries are still usable by name (e.g., `sparkrun run @experimental/my-recipe`) or with `sparkrun list --all`.
+**Stemless** means a registry's recipes are visible without providing an
+`@registry/` stem: they appear in default `sparkrun list` and `sparkrun search`
+results and can be referenced by recipe name alone. Registries with
+**Stemless: No** still work while enabled: use a qualified name such as
+`sparkrun run @experimental/my-recipe`, list one with
+`sparkrun list @experimental`, or include all enabled registries with
+`sparkrun list --all`.
 
 Use `sparkrun registry list` to see all configured registries and their status.
 
@@ -34,11 +40,40 @@ persist, and removing one prevents the plugin from adding it back automatically.
 Plugin authors can use `register_default_registry` without cloning repositories
 or editing user configuration during startup. See
 [Plugin Development: plugin-owned registries](/developer-reference/plugin-development/#plugin-owned-registries)
-for the registration example, visibility, overrides, and trust rules.
+for the registration example, stemless access, overrides, and trust rules.
+
+## The lil catalog
+
+The [lil launcher](https://github.com/local-inference-lab/lil) uses the
+[lil catalog](https://huggingface.co/local-inference-lab/lil-catalog) for its
+launch manifests. Sparkrun's bundled `lil` plugin translates those manifests
+into v2 recipes for the B12X vLLM image. It contributes the `@lil` registry and the
+`lil` recipe-format adapter. Plugin loading and its `registry.lil` capability
+default on only for alpha; on other channels, enable both:
+
+```bash
+sparkrun plugins enable lil
+sparkrun setup features enable registry.lil
+sparkrun registry update lil
+sparkrun list @lil
+sparkrun show @lil/<Entry>
+sparkrun run @lil/<Entry>
+sparkrun export recipe @lil/<Entry> --realize --cluster mylab --save realized.yaml
+```
+
+Choose an entry from the catalog and inspect its hardware requirements before
+launch. Listing reads cached metadata without model-network lookups; loading
+can resolve additional checkpoint facts. The adapter's conditional settings
+select supported hardware configurations during placement. See
+[realized exports](/cli/export/#realize-for-selected-hardware) to save resolved
+settings and pinned references.
+
+Plugins can register other foreign recipe formats through
+[Other recipe formats](/developer-reference/plugin-development/#other-recipe-formats).
 
 ## Spark Arena
 
-[Spark Arena](https://spark-arena.com) is the community recipe hub for DGX Spark. Vetted recipes are published to the `@official` registry; experimental recipes go to `@experimental`. Both are included by default — official recipes appear in `sparkrun list` and `sparkrun search`, while experimental ones can be accessed with `sparkrun list --all` or by name.
+[Spark Arena](https://spark-arena.com) is the community recipe hub for DGX Spark. Vetted recipes are published to the `@official` registry; experimental recipes go to `@experimental`. Both are included by default. The official registry is stemless; the experimental registry requires an `@experimental/` stem for recipe references. Use `sparkrun list @experimental` or `sparkrun list --all` to discover its recipes.
 
 ### `@spark-arena/` shortcut
 
@@ -125,7 +160,9 @@ sparkrun search qwen3
 sparkrun recipe search llama
 ```
 
-Searches by name, model, and description across all enabled registries.
+Searches by name, model, and description across enabled stemless registries.
+Add `--all` to include non-stemless registries, or name one explicitly with
+`sparkrun search @experimental/qwen3`.
 
 ## Creating a registry
 
@@ -192,7 +229,10 @@ registries:
 | `benchmarks` | no | `""` | Subdirectory containing benchmark profile YAML files. |
 | `mods` | no | `""` | Subdirectory containing shared mods (run.sh + supporting files) referenced from recipes' `mods:` field. Conventionally `mods` when present. |
 | `enabled` | no | `true` | Whether the registry is active on first add. |
-| `visible` | no | `true` | If `false`, recipes are hidden from default listings but still usable by name. |
+| `visible` | no | `true` | Controls stemless access. If `false`, recipes require an `@name/` stem and are omitted from default listings; use `--all` or name the registry explicitly to list them. |
+
+The configuration key remains `visible`; `sparkrun registry list` labels this
+setting **Stemless**. It is separate from `enabled`.
 
 :::note[Canonical vs short keys]
 The local `~/.config/sparkrun/registries.yaml` uses canonical key names (`subpath`, `tuning_subpath`, `benchmark_subpath`, `mods_subpath`). Repo manifests support both the canonical names and the shorter aliases listed above (`recipes`, `tuning`, `benchmarks`, `mods`); when both are present, the canonical key wins.

@@ -29,6 +29,7 @@ sparkrun cluster create <name> --hosts <ip1>,<ip2>,... [options]
 | `--executor` | Pin the launch [executor](/advanced/executors/) for this cluster |
 | `--executor-opt` / `-o` | Per-executor config, `-o key=value` (repeatable) |
 | `--default` | Set this cluster as the default after creating it |
+| `--offline` | Make launches use existing artifacts by default; see [Offline defaults](/clusters/managing/#offline-defaults) |
 
 ```bash
 sparkrun cluster create mylab \
@@ -61,6 +62,7 @@ All options are the same as `create`. Only provided options are updated — omit
 | `--topology` | Set the cluster's network topology |
 | `--infer-hardware` | Probe hosts and record detected accelerator metadata |
 | `--clear-executor-config` | Drop any stored per-executor config |
+| `--offline` / `--online` | Enable or remove the cluster's offline launch default |
 
 ```bash
 sparkrun cluster update mylab --hosts 10.24.11.13,10.24.11.14,10.24.11.15

@@ -49,6 +49,24 @@ Both `vllm-distributed` and `vllm-ray` use the same container images and support
 
 To add an engine, see [Runtime Implementations](/developer-reference/runtime-implementations/).
 
+## Recipes without command templates
+
+Prefer explicit `runtime` and supported `defaults`, allowing sparkrun to generate
+the engine command. Use `command` only for unusual flags absent from its mapping.
+Each reference lists the generated flags, their recipe keys, boolean behavior,
+and settings managed by placement:
+
+- [vLLM](/runtimes/vllm/#configuration-options)
+- [SGLang](/runtimes/sglang/#configuration-options)
+- [llama.cpp](/runtimes/llama-cpp/#configuration-options)
+- [TensorRT-LLM](/runtimes/trtllm/#configuration-options)
+- [Atlas](/runtimes/atlas/#configuration-options)
+- [Modular MAX](/runtimes/modular-max/#configuration-options)
+
+The engine image must support the requested flags. A custom command replaces
+normal flag generation, so it must contain the serving options you need.
+See [Recipe Format](/recipes/format/#command-optional) for template behavior.
+
 ## How runtimes work
 
 **Recipes** declare which runtime to use via the `runtime` field. The runtime handles:

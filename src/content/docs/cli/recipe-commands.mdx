@@ -10,13 +10,13 @@ sparkrun recipe list [query]
 sparkrun list [query]          # alias
 ```
 
-List available recipes from all configured registries. Optionally filter by a search query.
+List local recipes and recipes from enabled [stemless registries](/recipes/registries/#default-registries), whose recipes are visible without an `@registry/` stem. Optionally filter by a search query.
 
 ### Options
 
 | Option | Description |
 |---|---|
-| `--all` / `-a` | Include recipes from hidden registries |
+| `--all` / `-a` | Include recipes from non-stemless registries |
 | `--runtime` | Filter by runtime (e.g., `vllm`, `sglang`) |
 | `--registry` | Filter by registry name |
 | `--json` | Emit machine-readable JSON instead of the table |
@@ -44,7 +44,7 @@ sparkrun list @community/qwen   # --registry community, query "qwen"
 ```
 
 Naming a registry implies `--all`, so its recipes appear even if the registry
-is hidden by default. An unknown or disabled registry — whether named via the
+is not stemless. An unknown or disabled registry — whether named via the
 shorthand or `--registry` — is reported as an error listing the available
 registries, rather than silently yielding "No recipes found". Combining a
 conflicting `@scope` with `--registry` is also an error.
@@ -102,13 +102,14 @@ sparkrun recipe search <query>
 sparkrun search <query>        # alias
 ```
 
-Search for recipes by name, model, or description across all registries.
+Search local recipes and enabled stemless registries by name, model, or description.
+Use `--all` to include non-stemless registries, or select a registry explicitly.
 
 ### Options
 
 | Option | Description |
 |---|---|
-| `--all` / `-a` | Include recipes from hidden registries |
+| `--all` / `-a` | Include recipes from non-stemless registries |
 | `--runtime` | Filter by runtime (e.g., `vllm`, `sglang`) |
 | `--registry` | Filter by registry name |
 | `--json` | Emit machine-readable JSON instead of the table |

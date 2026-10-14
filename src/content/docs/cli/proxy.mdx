@@ -172,7 +172,8 @@ scope; a stale `enable_ui` key in `proxy.yaml` is warned about and ignored.
 
 ### `sparkrun proxy stop`
 
-Sends SIGTERM to the running proxy and its auto-discover process using the stored PIDs.
+Stops the running proxy and its discovery process. If a systemd unit owns the
+proxy, this stops that unit; it stays enabled for the next boot.
 
 ```bash
 sparkrun proxy stop
@@ -228,6 +229,7 @@ This is intentionally different from `sparkrun run`, which uses exactly the port
 | `-o` / `--option` | Override recipe options: `-o key=value` (repeatable) |
 | `--image` | Override container image |
 | `--solo` | Force single-node mode |
+| `--offline` / `--online` | Use cached assets or override the cluster's offline launch policy |
 | `--port` | Override serve port |
 | `--dry-run` / `-n` | Show what would be done without executing |
 
@@ -253,6 +255,51 @@ An alias is saved to `proxy.yaml` immediately. If a proxy is running, the
 config is regenerated and the proxy restarted so the alias takes effect. An
 alias whose target model has no healthy backend is saved but skipped in the
 generated config — it starts working as soon as the target is loaded.
+
+## Run as a systemd service
+
+On a Linux control machine, install a service to start the proxy at boot:
+
+```bash
+# Preview the default system unit and its scoped sudoers grant.
+sparkrun proxy systemd install --cluster mylab --dry-run
+
+# Install, enable, and start the unit.
+sparkrun proxy systemd install --cluster mylab --now
+sparkrun proxy systemd status --lines 50
+
+# Change saved settings and restart the installed unit.
+sparkrun proxy start --port 4100 --restart
+
+# Stop, disable, and remove the unit and its grant.
+sparkrun proxy systemd uninstall
+```
+
+The default system unit runs as your user and requires sudo for installation.
+It installs a sudoers grant for start/stop/restart of that specific unit.
+For a user unit, use `sparkrun proxy systemd install --user --now`. Boot startup
+then requires logind lingering; the installer attempts to enable it and reports
+the result.
+
+The unit runs `sparkrun proxy start --foreground`, reading saved `proxy.yaml`
+settings at each start. `install --cluster NAME` saves a discovery cluster;
+otherwise discovery uses the default cluster. Foreground supervision follows
+managed gateway restarts, allowing the service to keep supervising a replacement
+process.
+
+Once installed, `proxy start`, `proxy start --restart`, and `proxy stop` delegate
+to the unit, and `proxy status` identifies its owner. Stopping leaves it enabled;
+use `systemd uninstall` to remove boot startup. `install --now` replaces an
+existing proxy running outside the unit.
+
+| Subcommand | Options |
+|---|---|
+| `install` | `--user`, `--cluster NAME`, `--now`, `--dry-run` |
+| `status` | `--system` or `--user`, `--lines N` (default 20), `--json` |
+| `uninstall` | `--system` or `--user`, `--dry-run` |
+
+`--system` and `--user` are mutually exclusive. Status and uninstall detect the
+installed scope when neither is specified.
 
 ## How discovery works
 

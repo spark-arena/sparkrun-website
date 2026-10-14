@@ -103,6 +103,17 @@ and capture closure. Runtime checks cover command generation,
 overrides, quoting, revision binding, templates, and unsupported parallelism without
 launching a workload. Diagnostic fixtures write only temporary local bundles,
 without host probes or log readers.
+
+Runtime flag tables are generated from the same pinned source's static maps,
+without importing Sparkrun. To update or verify them:
+
+```sh
+python3 scripts/sync-runtime-flags.py --source /path/to/pinned/sparkrun
+python3 scripts/sync-runtime-flags.py --source /path/to/pinned/sparkrun --check
+```
+
+Review the surrounding prose for flags with special handling, placement-managed
+arguments, aliases, and engine-version requirements when changing the source pin.
 CI repeats the checks for stable/beta/alpha with advanced visibility both off and on
 (`--channel stable --advanced 0`, for example). Python fences are parsed;
 public imports and option constructors are checked without executing workloads.

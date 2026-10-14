@@ -24,17 +24,9 @@ defaults:
   host: 0.0.0.0
   n_gpu_layers: 99
   ctx_size: 8192
-
-command: |
-  llama-server \
-      -hf {model} \
-      --host {host} \
-      --port {port} \
-      --n-gpu-layers {n_gpu_layers} \
-      --ctx-size {ctx_size} \
-      --flash-attn on \
-      --jinja \
-      --no-webui
+  flash_attn: "on"
+  jinja: true
+  webui: false
 ```
 
 ## Key differences from vLLM/SGLang recipes

@@ -3,7 +3,7 @@ title: Recipe Format
 description: Complete specification of the sparkrun recipe YAML format.
 ---
 
-A sparkrun recipe is a YAML file that describes everything needed to launch an inference workload: the model, the container image, the runtime engine, default parameters, and the serve command. Recipes are the central abstraction in sparkrun — they let you capture a known-good configuration once and replay it with a single command.
+A sparkrun recipe is a YAML file that describes everything needed to launch an inference workload: the model, the container image, the runtime engine, and its settings. Recipes are the central abstraction in sparkrun — they let you capture a known-good configuration once and replay it with a single command.
 
 ```bash
 sparkrun run my-recipe --solo          # use defaults
@@ -13,9 +13,11 @@ sparkrun run my-recipe -o port=9000    # override any default
 
 ## Minimal recipe
 
-The smallest useful recipe needs only `model`, `runtime`, `container`, and `command`:
+Start with `model`, `runtime`, and `container`. Set supported engine options in
+`defaults`; sparkrun generates the serve command:
 
 ```yaml
+recipe_version: "2"
 model: Qwen/Qwen3-1.7B
 runtime: vllm
 container: scitrera/dgx-spark-vllm:0.16.0-t5
@@ -23,9 +25,6 @@ container: scitrera/dgx-spark-vllm:0.16.0-t5
 defaults:
   port: 8000
   host: 0.0.0.0
-
-command: |
-  vllm serve {model} --host {host} --port {port}
 ```
 
 ## Full recipe example
@@ -51,25 +50,45 @@ defaults:
   max_model_len: 200000
   served_model_name: nemotron3-30b-a3b
   tool_call_parser: qwen3_coder
+  enable_auto_tool_choice: true
+  trust_remote_code: true
 
 env:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-
-command: |
-  vllm serve \
-      {model} \
-      --served-model-name {served_model_name} \
-      --max-model-len {max_model_len} \
-      --gpu-memory-utilization {gpu_memory_utilization} \
-      -tp {tensor_parallel} \
-      --host {host} \
-      --port {port} \
-      --enable-auto-tool-choice \
-      --tool-call-parser {tool_call_parser} \
-      --trust-remote-code
 ```
 
 ## Core fields
+
+### `recipe_version`
+
+The recipe format version, independent of the installed sparkrun version:
+
+```yaml
+recipe_version: "2"
+```
+
+`"2"` is the current format and the default when this field is omitted. Examples
+throughout these docs use v2, even when they omit the version line. Use `"2"`
+for new recipes.
+
+`"1"` identifies the legacy format from eugr's `run-recipe` launcher. Sparkrun
+retains compatibility for existing recipes; see [Legacy v1 Recipes](/recipes/legacy-v1/)
+for its fields and conversion guidance. Use `min_sparkrun_version` below when
+you need a minimum core release rather than a format version.
+
+### `min_sparkrun_version`
+
+Declare the minimum core version needed by a recipe:
+
+```yaml
+min_sparkrun_version: "0.4.0"
+```
+
+Use a version string, not a range such as `>=0.4.0`. Omitting the field imposes no
+minimum. A compatible sparkrun checks this before workload preparation;
+`recipe validate` reports incompatibility, while inspection and export remain
+available. Enforcement was introduced in 0.4.0, so older releases cannot enforce
+this requirement.
 
 ### `model` (required)
 
@@ -125,20 +144,117 @@ container: scitrera/dgx-spark-sglang:0.5.8-t5
 container: scitrera/dgx-spark-llama-cpp:b8076-cu131
 ```
 
-### `command` (recommended)
+### `command` (optional)
 
-The shell command to execute inside the container. Uses `{placeholder}` syntax — any key from `defaults` (or CLI overrides) can be referenced.
+**Omit `command` when the runtime supports the settings you need.** Prefer
+`defaults` so sparkrun can generate engine flags and manage distributed launches.
+Provide `command` only when you need unusual CLI flags that are not mapped by
+the runtime. The runtime pages list the supported flags and their `defaults` keys:
+[vLLM](/runtimes/vllm/#configuration-options),
+[SGLang](/runtimes/sglang/#configuration-options),
+[llama.cpp](/runtimes/llama-cpp/#configuration-options),
+[TensorRT-LLM](/runtimes/trtllm/#configuration-options),
+[Atlas](/runtimes/atlas/#configuration-options), and
+[Modular MAX](/runtimes/modular-max/#configuration-options).
+
+For example, vLLM's `--reasoning-parser-plugin` needs an explicit command in this
+version of sparkrun. The referenced parser must be available inside the image:
 
 ```yaml
 command: |
-  vllm serve \
-      {model} \
-      --served-model-name {served_model_name} \
-      --host {host} \
-      --port {port}
+  vllm serve {model} \
+      --host {host} --port {port} \
+      --max-model-len {max_model_len} \
+      -tp {tensor_parallel} \
+      --reasoning-parser-plugin /opt/parsers/custom.py
 ```
 
-Substitution is iterative: if a placeholder resolves to a string containing another `{placeholder}`, it will be expanded in a second pass.
+A command template replaces automatic serve-flag generation. Include the engine
+options you need in that template; arbitrary `defaults` keys are not all appended
+to it. Sparkrun still handles runtime-specific coordination and supported managed
+arguments. `{placeholder}` values come from effective configuration and CLI
+overrides. Substitution is iterative when a value contains another placeholder.
+
+## Recipe inheritance
+
+Use `include:` to make a small variation of a sibling or registry recipe:
+
+```yaml
+# Save beside base.yaml as long-context.yaml.
+include: base
+min_sparkrun_version: "0.4.0"
+defaults:
+  max_model_len: 65536
+metadata:
+  description: A longer-context variant
+```
+
+A base may be a sibling name (`base` or `base.yaml`, without path separators) or
+a qualified registry reference such as `"@official/qwen3-1.7b-vllm"`.
+Underscore-prefixed siblings such as `_common.yaml` can hold shared settings.
+Bases can include other bases, up to eight levels; cycles are rejected.
+URL-fetched and catalog-imported recipes require qualified registry references.
+
+| Inherited value | How the child changes it |
+|---|---|
+| Mappings such as `metadata` | Merge key by key |
+| Individual values in `defaults` or `env` | Replace the entire setting, including a nested JSON object |
+| Scalars and lists, including hooks and mods | Replace the base value |
+| `overrides` | Append child entries after the base entries |
+| Explicit `null` | Delete the inherited key |
+
+Changing `model` drops inherited model metadata. Inherited registry mods keep
+their source registry. Trust follows the least-trusted member of the chain,
+so a local wrapper does not grant trust to a third-party base. Legacy v1 recipes
+cannot participate in includes.
+
+[`export recipe`](/cli/export/) flattens includes by default; `--keep-include`
+preserves the original reference and child settings.
+
+## Conditional overrides
+
+Use `overrides:` for settings that vary with a model's launch layout or hardware:
+
+```yaml
+defaults:
+  max_num_seqs: 8
+  max_model_len: 32768
+overrides:
+  - when: {nodes: 1}
+    defaults: {max_num_seqs: 1}
+  - when: {arch: sm_121, nodes: {gte: 2}}
+    defaults: {max_model_len: 65536}
+  - when: {config: {attention_backend: flashinfer}}
+    env: {MY_ATTENTION_BACKEND: "{config.attention_backend}"}
+```
+
+Each entry can change `defaults`, `env`, or `container`. Conditions within `when`
+must all match. Values accept equality, a list of alternatives, or operators
+`eq`, `ne`, `in`, `not_in`, `gt`, `gte`, `lt`, and `lte`.
+
+| Selector | Matches |
+|---|---|
+| `tp`, `pp`, `dp`, `ep`, `cp` | Resolved parallelism |
+| `nodes`, `gpus_per_node` | Launch host count and GPUs per host |
+| `runtime`, `runtime_family` | Runtime implementation or family |
+| `config: {key: value}` | Configuration before any conditional layer is applied |
+| `platform`, `vendor`, `accelerator`, `arch` | Hardware identity, such as `dgx-spark`, `nvidia`, `gb10`, `sm_121` |
+| `capability` | Accelerator capabilities, such as `unified-memory` |
+| `memory_gb` | Per-accelerator memory in GiB; host RAM for unified-memory devices |
+
+Matching entries apply in order; later entries win. CLI overrides still have
+the highest priority. Conditional layers cannot change `port`,
+`served_model_name`, or parallelism keys. Hardware-wide defaults, such as
+`CUTE_DSL_ARCH`, belong to the platform and usually need no recipe override.
+
+On mixed clusters, placement groups hosts that agree on the hardware conditions
+and selects a compatible group. A layout spanning incompatible groups is
+rejected. Unknown selectors/operators do not match and produce diagnostics.
+`run --dry-run` reports which layers apply; normal workload lookup retains the
+recipe's declared identity for `stop`, `logs`, and `--ensure`.
+
+Use [`export recipe --realize`](/cli/export/#realize-for-selected-hardware) to
+save the effective settings for selected hardware as an ordinary recipe.
 
 ## Topology fields
 
@@ -176,12 +292,6 @@ Set `max_nodes: 1` for models or runtimes that do not support multi-node inferen
 solo_only: true     # equivalent to max_nodes: 1, mode: solo
 cluster_only: true  # equivalent to min_nodes: 2, mode: cluster
 ```
-
-### `scheduler`
-
-Names the placement scheduler for this recipe (`occupancy-sparse`,
-`occupancy-dense`, or `greedy`). Sits below the `--scheduler` CLI flag and
-above the cluster's setting.
 
 ## Executor fields
 
@@ -274,7 +384,9 @@ defaults:
 
 #### Standardized defaults
 
-The following keys are recognized by all runtimes and are automatically mapped to the correct runtime-specific flags. New runtimes are expected to support these keys for cross-runtime compatibility.
+These common keys provide portable names where the runtime supports them.
+Consult the runtime's flag table for its exact mappings and limitations; not
+every engine has an equivalent for every setting.
 
 | Default key | CLI flag | Description |
 |---|---|---|
@@ -285,11 +397,14 @@ The following keys are recognized by all runtimes and are automatically mapped t
 | `max_model_len` | `--max-model-len` | Maximum sequence length |
 | `served_model_name` | `--served-model-name` | Model name exposed by the API (works for all runtimes) |
 
-Any other key can appear in defaults — there is no fixed schema. Runtime-specific parameters (like `tool_call_parser`, `attention_backend`, etc.) are passed through as `{placeholder}` values for use in the command template.
+Use the runtime's flag table to choose supported keys. Runtime-specific settings
+such as `tool_call_parser` and `attention_backend` are generated automatically
+when mapped. Extra keys can supply conditional selectors or explicit command
+placeholders, but an arbitrary key is not automatically forwarded as a flag.
 
-**Config chain precedence** (highest wins):
-1. CLI overrides (`--port 9000`, `--served-model-name my-model`, `-o key=value`)
-2. Recipe defaults
+**Config chain precedence**, from lowest to highest: runtime defaults, platform
+defaults, recipe defaults, matching [conditional overrides](#conditional-overrides),
+then CLI overrides (`--port 9000`, `--served-model-name my-model`, `-o key=value`).
 
 ### `env`
 
@@ -300,7 +415,8 @@ env:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 ```
 
-Values are passed through **literally**.
+Values are literal unless they contain one of the explicit
+[environment template](#environment-templates) namespaces below.
 
 :::caution[Changed in 0.3.0]
 Recipe `env` values are no longer expanded against the control machine's
@@ -316,6 +432,53 @@ cluster-level env reference (see
 [Managing Clusters](/clusters/managing/)) which resolves from a file at launch
 time and keeps secrets out of recipe YAML.
 :::
+
+### Environment templates
+
+Place templates directly in `env` to use effective configuration or prepared
+launch facts:
+
+```yaml
+defaults:
+  tensor_parallel: 2
+env:
+  TP_SIZE: "{config.tensor_parallel}"
+  NODE_RANK: "{launch.node_rank}"
+  MODEL_PATH: "{launch.model_path}"
+```
+
+`{config.NAME}` reads a scalar from effective configuration, including CLI
+overrides. `{launch.NAME}` supports:
+
+| Field | Value |
+|---|---|
+| `model_path` | Prepared model directory or selected GGUF file, mapped into the workload |
+| `model_revision` | Concrete Hugging Face snapshot commit shared by the selected nodes |
+| `runtime_cache_dir` | This launch's persistent runtime-cache directory |
+| `num_nodes` | Number of selected physical hosts |
+| `node_rank` | Zero-based host ordinal, independent of GPU/process rank |
+| `node_host` | Selected host name |
+| `cluster_id` | Launch identifier |
+
+Values are rendered per host after asset preparation. They reach container
+creation, in-container hooks, and serving; controller-side `post_commands` do
+not inherit them. Path fields support Docker and local execution. Model fields
+check the prepared cache; a local model path has no Hugging Face revision.
+`runtime_cache_dir` requires an enabled runtime cache.
+
+There is no shell evaluation, controller-environment lookup, or recursive
+substitution. `$VAR`, `${VAR}`, and unrelated braces remain literal. Write
+`{{launch.node_rank}}` to preserve the literal `{launch.node_rank}`. Missing
+fields and non-scalar config values produce errors. Literal CLI environment
+overrides (`-e KEY=value` or `-o env.KEY=value`) replace templates without
+interpolation. Exports retain the template source rather than per-host paths.
+
+Dry runs leave model paths and revisions marked unresolved without probing
+model caches. External-script runtimes do not support these templates; custom
+execution strategies must provide their own template handling. MPI launches
+cannot use values that differ across nodes. See
+[Plugin Development](/developer-reference/plugin-development/#preparation-and-execution-strategies)
+for integration requirements.
 
 ## Metadata fields
 
@@ -367,7 +530,7 @@ container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
 
 mods:
   - mods/nemotron-nano          # resolved against the recipe's location / registry
-  - @eugr/mods/qwen3-tools      # explicitly scoped to the @eugr registry
+  - "@eugr/mods/qwen3-tools"      # explicitly scoped to the @eugr registry
   - my-private-tweak            # short form — leading "mods/" is optional
 ```
 
@@ -426,8 +589,8 @@ mods:
 ```yaml
 # my-local-recipe.yaml
 mods:
-  - @official/nemotron-nano        # pulled from the @official registry's mods_subpath
-  - @eugr/mods/qwen3-coder         # pulled from @eugr, with explicit "mods/" prefix
+  - "@official/nemotron-nano"        # pulled from the @official registry's mods_subpath
+  - "@eugr/mods/qwen3-coder"         # pulled from @eugr, with explicit "mods/" prefix
 ```
 
 Useful for mixing-and-matching mods from registries that don't own the recipe.

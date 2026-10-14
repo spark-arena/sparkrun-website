@@ -30,6 +30,21 @@ SSH user, cache directories — and checks whether those cache directories exist
 on each host. The fastest way to diagnose a transfer or permission problem
 without launching a job.
 
+## Offline defaults
+
+Save `offline: true` on a cluster to make `run`, `benchmark`, and `proxy load`
+reuse existing artifacts by default:
+
+```bash
+sparkrun cluster update mylab --offline
+sparkrun cluster update mylab --online
+```
+
+`--online` removes the saved offline default. Individual operations can override
+the cluster policy with `--offline` or `--online`. Copies within the cluster are
+allowed; required recipes, images, models, and tools must already be available.
+See [Offline launches](/cli/run/#offline-launches).
+
 ## Cluster-level environment
 
 A cluster can carry container environment variables that apply to every

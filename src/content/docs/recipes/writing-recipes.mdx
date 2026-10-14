@@ -5,7 +5,9 @@ description: How to create your own sparkrun recipes.
 
 ## Start from an existing recipe
 
-The easiest way to create a new recipe is to copy one that uses the same runtime and modify it. Sparkrun will see any recipes in the current directory and can check and run them.
+Start from a recipe for the same runtime, using `include:` for a small variation
+or exporting a copy for independent edits. Prefer `runtime` plus supported
+`defaults` and omit `command`; add a command only for unusual unmapped flags. Sparkrun will see any recipes in the current directory and can check and run them.
 
 For more complex recipes involving [mods](/recipes/format/#mods), [tunings](/cli/tune/), or [benchmarks](/cli/benchmark/#benchmark-profiles), it is recommended to first review the Sparkrun [security model](/advanced/security/) so you can be aware of important limitations and caveats, and then set up your own [recipe registry](/recipes/registries/).
 
@@ -17,19 +19,24 @@ sparkrun list
 sparkrun show qwen3-1.7b-vllm
 ```
 
+See [recipe inheritance](/recipes/format/#recipe-inheritance),
+[conditional overrides](/recipes/format/#conditional-overrides), and
+[realized exports](/cli/export/#realize-for-selected-hardware) for reuse and
+hardware-specific settings. Each [runtime reference](/runtimes/overview/#recipes-without-command-templates)
+lists its generated flags and `defaults` keys.
+
 ## Step by step
 
 1. **Set `model`** to the HuggingFace model ID you want to serve
 2. **Set `container`** — see [Runtimes Overview](/runtimes/overview/) for maintained images and latest tags.
 3. **Set `runtime`** to the engine you're targeting (`vllm`, `sglang`, `llama-cpp`, etc.). While sparkrun can [auto-detect the runtime](/recipes/format/#automatic-runtime-detection) from the command prefix, explicitly setting it is preferred for clarity and to avoid surprises if the heuristics evolve.
-4. **Tune `defaults`** — start conservative with `gpu_memory_utilization: 0.5` and a low `max_model_len`, then increase after confirming the model loads
-5. **Add `metadata`** with `model_params` and `model_dtype` so VRAM estimation works
-6. **Validate**: `sparkrun recipe validate your-recipe.yaml`
-7. **Test**: `sparkrun run your-recipe.yaml --solo --dry-run`
+4. **Tune `defaults`** — start with `gpu_memory_utilization: 0.8` and `max_model_len: 32768`. For vLLM, you can instead use `max_model_len: auto` to fit the context length to available GPU memory. Adjust after confirming the model loads.
+5. **Validate**: `sparkrun recipe validate your-recipe.yaml`
+6. **Test**: `sparkrun run your-recipe.yaml --solo --dry-run`
 
 ## Example: vLLM recipe
 
-Using `runtime: vllm` here resolves to `vllm-distributed` by default (see [vLLM runtime](/runtimes/vllm/) for details on the two variants). While `runtime` could be omitted since sparkrun would [auto-detect](/recipes/format/#automatic-runtime-detection) it from the `vllm serve` command, explicitly setting it is recommended.
+Using `runtime: vllm` here resolves to `vllm-distributed` by default (see [vLLM runtime](/runtimes/vllm/) for details on the two variants). Sparkrun generates the `vllm serve` command from the runtime and defaults.
 
 ```yaml
 model: my-org/my-model
@@ -39,23 +46,18 @@ container: scitrera/dgx-spark-vllm:0.16.0-t5
 metadata:
   description: My custom model
   maintainer: me@example.com
-  model_params: 7B
-  model_dtype: bf16
 
 defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 1
   gpu_memory_utilization: 0.8
-  max_model_len: 32768
-
-command: |
-  vllm serve {model} \
-      --max-model-len {max_model_len} \
-      --gpu-memory-utilization {gpu_memory_utilization} \
-      -tp {tensor_parallel} \
-      --host {host} --port {port}
+  max_model_len: 32768           # or auto for vLLM
 ```
+
+With `max_model_len: auto`, vLLM chooses the largest context length that fits
+within the GPU memory budget, up to the model's supported maximum. See
+[vLLM's `--max-model-len` reference](https://docs.vllm.ai/en/v0.16.0/configuration/engine_args/#--max-model-len).
 
 ## Tips
 

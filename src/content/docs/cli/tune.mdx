@@ -16,17 +16,25 @@ sparkrun tune sglang <recipe> [options]
 sparkrun tune vllm <recipe> [options]
 ```
 
-Run kernel autotuning on a single host using a recipe's container image. This generates optimal tile configurations (BLOCK_M/N/K, warps, stages) for fused MoE kernels — and, for vLLM, also for FP8 dense GEMM kernels — at each tensor parallel size. The resulting configs are saved locally and **auto-mounted in future `sparkrun run` invocations** — no manual configuration needed.
+Run kernel autotuning on a single host using a recipe's container image. Both
+SGLang and vLLM support fused MoE and dense FP8 kernels. Results are saved in
+the tuning cache for automatic reuse by future `sparkrun run` invocations.
 
 Tuning is particularly beneficial for Mixture-of-Experts (MoE) models and FP8 quantized models, where the fused-MoE / FP8 GEMM kernels are performance-critical paths. Default Triton configs are generic; tuning finds the best configuration for your specific hardware and model combination.
 
 ## How it works
 
-`sparkrun tune sglang` launches a tuning container on the target host, clones SGLang's benchmark scripts inside it, detects the Triton version, and runs SGLang's autotuner for each requested TP size before tearing the container down.
+`sparkrun tune sglang` defaults to MoE tuning: it launches a tuning container,
+clones SGLang's benchmark scripts, detects Triton, and tunes each requested TP
+size. Dense FP8 mode uses explicit per-rank shapes and the kernels in the serving
+image; it does not use the cloned MoE benchmark scripts.
 
 `sparkrun tune vllm` shells out to the [vllm-tune](https://github.com/SeraphimSerapis/vllm-tune) backing engine on the target host. Sparkrun ensures the pinned vllm-tune git ref is checked out under `~/.cache/sparkrun/vllm-tune/<ref>/`, then invokes `vllm-tune.sh --standalone --foreground --mode {moe|fp8|all}` once per TP size. vllm-tune manages its own standalone tuning container per TP, covers both fused MoE and FP8 dense GEMM kernels, and writes results into sparkrun's flat tuning cache via its `--export-sparkrun` integration point. Sparkrun then rsyncs that cache back to the control machine.
 
-In both cases, on subsequent `sparkrun run` invocations the configs are auto-detected and mounted with the appropriate environment variable (`SGLANG_MOE_CONFIG_DIR` for SGLang, `VLLM_TUNED_CONFIG_FOLDER` for vLLM).
+Subsequent runs mount MoE configs through `SGLANG_MOE_CONFIG_DIR` for SGLang and
+use `VLLM_TUNED_CONFIG_FOLDER` for vLLM. Matching SGLang dense FP8 configs are
+installed into the Docker serving image's configuration directories before
+serving, preserving bundled configurations for other shapes.
 
 ### Prerequisites
 
@@ -39,13 +47,18 @@ In both cases, on subsequent `sparkrun run` invocations the configs are auto-det
 | `--hosts` / `-H` | Comma-separated host list (only the first host is used) | both |
 | `--hosts-file` | File with hosts (one per line) | both |
 | `--cluster` | Use a saved cluster by name | both |
-| `--tp` | TP size(s) to tune (repeatable; default: 1,2,4,8) | both |
+| `--tp` | TP sizes (repeatable; normally 1,2,4,8). SGLang FP8 accepts one value, defaulting to recipe TP or 1. | both |
 | `--image` | Override container image | both |
 | `--output-dir` | Override tuning config output directory | both |
 | `--parallel` / `-j` | Run N tuning jobs concurrently (default: 1 = sequential) | both |
 | `--dry-run` / `-n` | Show what would be done without executing | both |
 | `--skip-clone` | Skip cloning benchmark scripts (if already in image) | sglang only |
 | `--mode {moe,fp8,all}` | Kernels to tune (default: `all`) | vllm only |
+| `--mode {moe,fp8}` | Kernels to tune (default: `moe`) | sglang only |
+| `--shape N K` | Per-rank FP8 weight shape; repeatable and required for FP8 | sglang FP8 |
+| `--block-shape N K` | Quantization block dimensions (default: `128 128`); powers of two, at least 16 | sglang FP8 |
+| `--batch-size M` | Token count to tune; repeatable | sglang FP8 |
+| `--timeout` | Per-TP timeout in seconds; 0 means no timeout | both |
 | `--vllm-tune-ref` | Override the vllm-tune git ref pinned in config | vllm only |
 
 ## SGLang tuning
@@ -67,7 +80,29 @@ sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1 -j4
 sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1 --dry-run
 ```
 
-Requires an SGLang recipe (the recipe's `runtime` must be `sglang`). Configs are saved to `~/.cache/sparkrun/tuning/sglang/` and auto-mounted via `SGLANG_MOE_CONFIG_DIR`.
+Requires an SGLang recipe (the recipe's `runtime` must be `sglang`). MoE configs are saved to `~/.cache/sparkrun/tuning/sglang/` and auto-mounted via `SGLANG_MOE_CONFIG_DIR`.
+
+### Dense FP8 tuning
+
+Use the **per-rank weight shapes** reported by the serving runtime. Choose the
+same image, tensor parallelism, and quantization block shape as the intended
+deployment. The dimensions below are illustrative; replace them with your
+model's shapes:
+
+```bash
+sparkrun tune sglang my-fp8-recipe --cluster mylab --mode fp8 \
+  --tp 2 --shape 4096 4096 --shape 14336 4096 \
+  --block-shape 128 128 --batch-size 1 --batch-size 16
+```
+
+FP8 mode accepts one TP value and requires `--parallel 1` (the default), because
+the shapes are already per rank. MoE mode does not accept shape/batch options.
+
+Results live under `~/.cache/sparkrun/tuning/sglang/fp8/`. Future Docker launches
+install matching configurations before the server starts, including when the
+server runs as a non-root user. Installation failure produces a warning; configs
+already bundled in the image remain available. Keep the tuning and serving
+images compatible.
 
 ## vLLM tuning
 
@@ -121,6 +156,6 @@ Once tuning configs exist on a host, every `sparkrun run` for the matching runti
 
 - Tuning runs on a **single host** even if you specify a cluster — only the first host is used.
 - Each TP size produces its own config. Tune for the TP sizes you actually plan to use.
-- Use `-j4` to run multiple TP sizes in parallel and reduce total tuning time.
+- Use `-j4` for parallel MoE/vLLM tuning; SGLang FP8 requires `--parallel 1`.
 - Use `--dry-run` to preview the Docker and tuning commands before committing to a long run.
 - Tuning can take hours per TP size depending on the model.
