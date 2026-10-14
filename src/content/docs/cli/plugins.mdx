@@ -1,0 +1,135 @@
+---
+title: sparkrun plugins
+description: Plugin loading controls and managed Git installation, updates, removal, and rollback.
+---
+
+```bash
+sparkrun plugins
+sparkrun plugins list --json
+```
+
+`plugins` alone lists inventory. The hidden `setup plugins` alias remains for
+existing scripts. Management reads metadata without loading broken plugins;
+commands that activate a generation also check its compatibility and loadability.
+See [Managed Plugins](/advanced/plugins/) for trust, storage, and ref policy.
+
+## list
+
+```bash
+sparkrun plugins list --check
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--json` | Metadata, compatibility reasons, loaded state, and load-check results |
+| `--check` | Execute trusted managed plugins in bounded child processes (60 seconds each), including disabled ones |
+
+Without `--check`, listing does not import plugin code. `STATE` is the effective
+loading policy, separate from compatibility and actual loaded state. `FEATURES`
+lists declared flags, including disabled plugins' declarations; `none` means no
+separate capability flags and `unavailable` means metadata could not be read.
+Use `setup features list` for effective capability values and ownership. Unknown
+versions are `null` in JSON; unknown/incompatible reasons follow the text table.
+
+## enable and disable
+
+```bash
+sparkrun plugins enable sparkroute --dry-run
+sparkrun plugins enable sparkroute
+sparkrun plugins disable oci-relay
+```
+
+Both accept a plugin name and `--dry-run`, and work with bundled, managed, manual,
+and installed plugins. They set `plugins.enabled` without rewriting capability
+flags. Disabling preserves installed code/settings and does not stop services.
+Restart consumers to apply loading changes. Application-required plugins cannot
+be disabled. Dry runs do not execute lifecycle hooks.
+
+Gateway selection is a separate capability action:
+
+```bash
+sparkrun setup features enable gateway.sparkroute
+```
+
+This explicitly selects the provider, even if the flag is already on; the parent
+plugin must be enabled and available. `plugins enable` alone does not select it.
+
+## add
+
+```bash
+sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --enable
+sparkrun plugins add https://github.com/sparksq/sparkrun-coldsnap-plugin --enable
+```
+
+| Option | Meaning |
+| --- | --- |
+| `SOURCE` | HTTPS/SSH Git URL or local Git repository with `plugin.toml` and static `pyproject.toml` |
+| `--ref REF` | Branch, tag, or full commit; defaults to `main` |
+| `--trust` | Explicit consent for this source and future compatible updates |
+| `--enable` | Explicitly enable plugin loading after installation; capability flags retain their values |
+| `--dry-run` | May fetch metadata; does not trust, execute, activate, or prune |
+
+Review the source before granting trust. Generic `--yes` does not grant source
+trust (and is not an `add` option). Enabling `core.external_plugins` can require
+separate confirmation for existing manual paths. Installing a plugin does not
+trust its recipe registries. Git acquisition does not install dependencies or run
+a build backend; the host must already satisfy the declared constraints.
+
+For noninteractive installation, use `--trust` only after that review:
+
+```bash
+sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --trust --enable
+```
+
+## update
+
+```bash
+sparkrun plugins update sparkroute
+sparkrun plugins update --all --dry-run
+sparkrun plugins update sparkroute --ref refs/tags/v0.2.1
+```
+
+The tag is an illustrative pin: choose an existing, compatible plugin release.
+
+| Option | Meaning |
+| --- | --- |
+| `PLUGIN` | Stable managed name or unambiguous saved source URL |
+| `--all` | Update every managed plugin; mutually exclusive with `PLUGIN` |
+| `--ref REF` | Change one plugin's saved branch/pin; requires `PLUGIN` |
+| `--trust` | Consent to changed declarations; requires `PLUGIN` |
+| `--dry-run` | Preview metadata/compatibility; may fetch, never executes or activates |
+
+Branches advance on new commits even without a version-string change. Tags and
+commits stay pinned. Moved tags are refused; ambiguous names need fully qualified
+refs. Failed candidates leave the active generation intact. `--all` continues
+other updates but reports failures with a nonzero exit status.
+
+Updates and rollback preserve loading policy and capability flags; updates do not
+enable disabled plugins. Core `update` and `setup update` perform compatible managed updates by default.
+`--no-update-plugins` still audits local compatibility; it neither fetches nor
+reports remote update availability. Unmanaged plugins are audited, never rewritten.
+
+## rollback
+
+```bash
+sparkrun plugins rollback sparkroute --dry-run
+sparkrun plugins rollback sparkroute
+```
+
+`--dry-run` checks retained integrity and compatibility without loading or
+activating. Real rollback checks loading and swaps current/previous generations
+without fetching. It does not change the tracked ref; use `update --ref` to pin.
+Default `plugins.retain_generations: 2` retains current and previous; `1` disables
+history. Successful mutations prune to the configured limit. Restart long-lived
+consumers after replacement and respect daemon generation leases.
+
+## remove
+
+```bash
+sparkrun plugins remove sparkroute --dry-run
+sparkrun plugins remove sparkroute --yes
+```
+
+`--yes` confirms removal; `--dry-run` previews it. Removal deletes manager-owned
+payloads/history even if the plugin cannot load. Capability flags, runtime data,
+and recipe-registry settings are preserved.

@@ -3,14 +3,14 @@ title: Proxy Gateway
 description: Serve multiple models through a single OpenAI-compatible API endpoint.
 ---
 
-This tutorial shows how to use sparkrun's proxy gateway to serve multiple inference models through a single unified API endpoint, powered by [LiteLLM](https://docs.litellm.ai/).
+This tutorial uses the bundled LiteLLM gateway to serve models through one API. Gateways are pluggable; LiteLLM remains the default on all channels. For optional SparkRoute installation and persistent selection, see [proxy](/cli/proxy/#choose-a-gateway).
 
 The sparkrun proxy sits in front of your running inference workloads and provides:
 
 - A single OpenAI-compatible API endpoint (default: `http://localhost:4000/v1`)
 - Automatic discovery of running sparkrun inference endpoints
 - Model aliases so clients can use familiar names (e.g., `gpt-4` routed to a local model)
-- Dynamic loading and unloading of models without restarting the proxy
+- Model load/unload management; LiteLLM applies changed configuration by restarting, while other gateways can reconcile their own state
 
 ## 1. Launch some models
 
@@ -18,11 +18,11 @@ Start by running a couple of inference workloads:
 
 ```bash
 sparkrun run qwen3-1.7b-vllm
-sparkrun run qwen3.5-0.8b-bf16-sglang
+sparkrun run qwen3.5-0.8b-bf16-sglang --port 8001
 ```
 
 :::note
-Press Ctrl+C after each launch to detach from logs — the models keep serving in the background.
+Default launches return after readiness. `--follow` keeps watching; Ctrl+C detaches while models remain serving. Use sufficient cluster capacity for two exclusive reservations and distinct serve ports when sharing an endpoint host.
 :::
 
 ## 2. Start the proxy
@@ -33,7 +33,7 @@ Launch the proxy gateway. It automatically discovers your running endpoints:
 sparkrun proxy start --host 127.0.0.1
 ```
 
-You'll see output like:
+Illustrative output (addresses, gateway details, and models vary):
 
 ```
 Discovering inference endpoints...

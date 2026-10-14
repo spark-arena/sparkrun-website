@@ -1,0 +1,357 @@
+---
+title: Model Cache Management
+description: Model validation, cache usage and retention, optional LRU cleanup, parallel transfers, and runtime cache reuse.
+---
+
+Manifest preparation binds a model's endpoint, immutable commit, selected files,
+checksums and runtime paths together. Core validates every required host before
+launch; a download, rsync exit code or plugin success receipt is insufficient.
+
+## Default behavior and policy
+
+No configuration change is needed to adopt manifests. The default `legacy`
+policy uses metadata validation with compatibility fallback. Optional settings
+in `config.yaml`:
+
+```yaml
+model_cache_validation: legacy        # legacy (default) | metadata | checksum
+model_file_selection: auto            # auto | all | safetensors
+model_distribution_provider: auto     # auto | builtin | registered provider name
+model_transfer_streams_per_host: 2     # rsync processes per destination
+model_transfer_max_streams: 16         # total rsync processes per copy operation
+# model_distribution_fallback: true   # optional override of provider policy
+```
+
+Both `legacy` and `metadata` resolve authoritative inventories, select required
+files, check existence/type/readability/size, and persist manifests automatically.
+Manifests are stored in `.sparkrun-model-artifacts/` under the HF cache home on
+the inventory source and launch targets. Lookups cover both the requested ref and
+resolved commit, so a later pinned recipe can reuse an inventory learned from an
+unpinned launch. Inventory is saved before acquisition/repair, so even an
+interrupted or failed preparation retains the expected file list for a later
+offline run. Stored manifests describe expected files; they never replace
+checking the current files or certify that a download completed.
+
+The difference is what happens when inventory is unavailable:
+
+- `legacy` uses saved inventory if available, warning when an online mutable-ref
+  refresh fails. Without inventory it warns that the cache is unverified and uses
+  the previous cache/download checks. This lets existing offline caches keep
+  working and migrate automatically on a later successful online preparation.
+- `metadata` requires authoritative inventory; missing inventory or a failed
+  online mutable-ref refresh fails preparation.
+- `checksum` has the same inventory requirement and additionally reads selected
+  payloads to check authoritative SHA-256 or Git blob SHA-1 hashes. Missing
+  digests are unverified, never successful checksum checks.
+
+Every policy rejects invalid manifests and requires repair or failure for known
+missing/damaged files. Repair, transport and workload access failures never
+downgrade to the old checks. Selecting a model provider requires the strict
+inventory contract even if the configured validation policy is `legacy`.
+
+Named clusters can override those settings without changing global configuration:
+
+```yaml
+distribution:
+  model:
+    validation: metadata
+    file_selection: auto
+    provider: builtin
+    streams_per_host: 2
+    max_streams: 16
+    # fallback: false
+```
+
+Existing `enabled`, `preserve_perms` and `skip_fan_out` remain compatible with the
+compatibility fallback. Manifest preparation reobserves each host even on shared storage;
+already-complete destinations need no copy. It does not recursively chown caches.
+Its snapshot copies preserve times when supported, without preserving ownership
+or permissions. Permission failures fail preparation rather than triggering a
+large redownload under a different identity.
+
+## Select files without redundant weights
+
+With inventory available, the default `auto` selection reads the root
+`model.safetensors.index.json` at the resolved commit and
+includes every shard named by its `weight_map`. It excludes unreferenced root
+checkpoints and recognized `original/` and `metal/` alternative weight payloads.
+Configuration, tokenizer, license and other ancillary files remain included.
+Unfamiliar nested component trees remain included to avoid discarding separate
+vision/encoder weights. No shard count is inferred from safetensors filenames.
+Without a root index, the complete repository inventory is selected.
+
+Use `all` for a loader requiring additional weight formats; `safetensors` requires
+a root index and fails if none exists. GGUF uses its quantization selection,
+checks multipart completeness, and binds its selected weight and projector from
+that same revision. It never picks an arbitrary cached snapshot at launch.
+
+## Inspect, migrate and repair
+
+These commands print structured JSON reports; inspection/import return nonzero
+when a target is incomplete or unverified. `--host` is repeatable and uses the
+configured SSH credentials; `--cache-dir` is the target's HF home, not `hub/`.
+
+```sh
+# Metadata only, offline and read-only; no recursive cache traversal.
+sparkrun model-cache inspect org/model --revision COMMIT --cache-dir /models/hf
+
+# Resolve authoritative inventory online (plus a small index, at most 16 MiB).
+sparkrun model-cache resolve org/model --revision COMMIT --output manifest.json
+
+# Import trusted inventory for an existing/offline cache. Import is not repair.
+sparkrun model-cache import org/model --revision COMMIT --manifest manifest.json
+
+# Repair exactly the missing/wrong-size files and revalidate each target.
+sparkrun model-cache repair org/model --revision COMMIT --host node1 --host node2
+
+# Explicit checksum audit/repair, including same-size corruption.
+sparkrun model-cache inspect org/model --revision COMMIT --checksum
+sparkrun model-cache repair org/model --revision COMMIT --checksum
+```
+
+Pass the same `--file-selection` and GGUF `--projector` used for preparation when
+inspecting or importing. `repair` accepts `--transfer-mode`, `--local-cache-dir`,
+`--offline` and `--dry-run`. Offline preparation uses saved/imported inventory and
+existing controller/cluster files; it never calls the Hub or installs tools. A
+manifest-less offline cache is **unverified**, not implicitly valid or corrupt;
+only `legacy` launch/distribution may proceed using the previous presence checks.
+Dry-run makes no metadata requests, probes or cache writes. Origin resolution
+for mutable refs is online even when the payload is already cached. A pinned
+commit with saved inventory needs no origin request.
+
+The Python surface is `sparkrun.api.model_cache`: `resolve_manifest`,
+`inspect_model`, `import_manifest`, and `repair_model`, with typed requests,
+manifests, reports and prepared bindings. `api.materialize()` remains read-only.
+
+For a pre-placed directory, put the trusted manifest at
+`<directory>/.sparkrun-model-manifest.json`, with inventory paths relative to that
+directory. For a pre-placed GGUF file, use
+`<file>.sparkrun-model-manifest.json`, paths relative to its parent, and set
+`weight_path` to that filename. These inventories are checked before launch,
+including under the default policy; missing inventories produce an explicit unverified
+migration warning. Core does not acquire or repair pre-placed paths automatically.
+
+## Usage tracking and retention
+
+Model preparation records usage in `HF_HOME/.sparkrun-model-artifacts/usage/`,
+separately from immutable file manifests. Records are keyed by repository and full
+immutable revision, and track preparation, acquisition, distribution-source use,
+launch attempts, and confirmed workload release. Even a warm preparation needs
+this metadata directory to be writable. Inspection and manifest import do not
+refresh usage or make unknown files eligible for cleanup.
+
+Records live on each cache host. Delegated downloads and fan-out record use on
+the head and workers without storing weights on the controller. Shared mounts
+share usage records and workload claims; reports from hosts using the same cache
+are views of that cache, not additional copies to sum into a cluster byte total.
+
+Inspect all revisions, including untracked snapshots and their protection reasons:
+
+```bash
+sparkrun model-cache list --host node1 --host node2 --cache-dir /models/hf
+```
+
+To keep an already tracked revision, set a retention pin with its full immutable
+commit. Remove the pin with `--remove`:
+
+```bash
+sparkrun model-cache pin org/model --revision FULL_COMMIT --host node1 --cache-dir /models/hf
+sparkrun model-cache pin org/model --revision FULL_COMMIT --host node1 --cache-dir /models/hf --remove
+```
+
+Pinning on a chosen head host can preserve a cluster seed. There is no automatic
+cluster-wide replica placement policy.
+
+### Preview and apply LRU cleanup
+
+`model-cache prune` selects eligible revisions in least-recently-used order.
+It defaults to a **read-only preview** and a **seven-day minimum age**. Without
+a byte target, it selects every eligible revision older than that age.
+
+```bash
+# Preview a 500 GiB private snapshot budget on this cache.
+sparkrun model-cache prune --host node1 --cache-dir /models/hf \
+  --min-age-days 7 --max-bytes 536870912000
+
+# Apply the reviewed policy explicitly.
+sparkrun model-cache prune --host node1 --cache-dir /models/hf \
+  --min-age-days 7 --max-bytes 536870912000 --apply
+```
+
+| Target | What it measures |
+| --- | --- |
+| `--max-bytes` | Private allocations in tracked snapshots; excludes canonical/shared HF blobs and untracked content |
+| `--min-free-bytes` | Actual free space on the cache filesystem |
+
+Targets apply per cache. With both set, cleanup continues until both are met or
+no eligible revision remains. The CLI exits nonzero when a target cannot be met;
+it never overrides protections to reach the requested budget.
+
+Reports separate logical file size, reclaimable snapshot allocations, planned
+removals, and filesystem free space. Allocation estimates exclude symbolic links
+and multiply linked files. They cannot promise exact reclamation with compression,
+reflinks, or concurrent disk activity. Applied cleanup measures `free_bytes_after`
+again; previews estimate it. **Shared HF blobs are never deleted**, so removing
+a symlink-based snapshot can reclaim no weight bytes.
+
+Machine-readable reports expose stable `reason_code` values alongside explanatory
+`reason` text. `budget_scope: private_managed_snapshots`,
+`reclaimed_bytes_kind: allocated_bytes_estimate`, and
+`free_bytes_after_kind: projection` or `measured` identify the accounting used.
+Python `CacheReport` and `CacheEntry` results also support mapping access. A
+successful call can still report `target_met: false`; inspect each host report.
+
+Pin/reconcile requests preserve the model origin endpoint and reject a mismatch
+with the tracked snapshot. Publication leases cover transfer and validation; loss
+of a lease cancels outstanding work instead of publishing an unprotected result.
+The index metadata size limit applies to index JSON, not model weight files.
+
+Only tracked revisions with a known file inventory are eligible. Unknown snapshots,
+unexpected files, pins, busy publication locks, invalid metadata, and active workload
+claims are protected. Arbitrary pre-placed model directories are outside cleanup's
+scope. Successfully prepare or repair an existing HF snapshot to enroll it;
+importing a manifest alone does not grant cleanup ownership. Use
+`--file-selection all` when preparation needs to include every repository file.
+
+### Workload claims and reconciliation
+
+Claims protect prepared models, including draft models and selected projector
+files, before preparation releases its repository locks. They survive the launching
+CLI. Manifest-less legacy launches conservatively protect all previously tracked
+revisions of their model. Confirmed `stop`/`stop --all` releases the corresponding
+claims and restarts the retention age. Failed or interrupted activation keeps
+its claims; elapsed time or a dead controller does not prove a remote workload stopped.
+
+Retry normal stop for a known workload. If its job metadata is missing, inspect
+**every host named in the claim**, stop the workload and any in-flight launch,
+then release the exact claim ID reported by `list`:
+
+```bash
+sparkrun model-cache reconcile org/model --revision FULL_COMMIT \
+  --claim CLAIM_ID --host node1 --cache-dir /models/hf --confirm-inactive
+```
+
+This removes the protection record, not model files, and refreshes its retention
+age. `--confirm-inactive` is the operator's assertion; reconciliation does not
+probe processes to establish inactivity. Other applications and older sparkrun
+processes do not participate in these claims. Pin revisions they use or leave
+automatic cleanup disabled on shared caches.
+
+### Optional automatic cleanup
+
+Automatic cleanup is disabled by default. To opt in, set `enabled: true` and at
+least one byte target in `config.yaml`:
+
+```yaml
+model_cache_prune:
+  enabled: true
+  min_age_days: 7
+  min_free_bytes: 107374182400     # 100 GiB free-space target per cache
+  # max_bytes: 536870912000       # optional 500 GiB private snapshot budget
+```
+
+Cleanup runs before manifest-based preparation, with the repository being prepared
+excluded. It preserves pins and workload claims, and warns if protected content
+prevents meeting the target. This does not guarantee the next download will fit.
+It does not run on dry-run launches and requires no background daemon.
+
+Inventory and retention commands require **Python 3 on Linux cache hosts** and
+use the existing SSH/host session. They do not contact the model origin or install
+tools. The existing manifest metadata inspection remains independent of this helper.
+See [model-cache CLI](/cli/model-cache/#retention-options) for options and
+[Daemon API](/developer-reference/daemon-api/#model_cache) for HTTP requests.
+
+## Parallel model copies
+
+Builtin manifest transfers use two rsync processes per destination and at most
+sixteen per copy operation by default. Configure `model_transfer_streams_per_host`
+and `model_transfer_max_streams` globally, or `streams_per_host` and `max_streams`
+under a cluster's `distribution.model`. Both must be positive integers; set both
+to `1` for serial copies. Plugins and legacy fallback use their own transfer behavior.
+
+Only files failing validation enter the queue. Files at least 64 MiB transfer
+individually; smaller files are batched. Scheduling rotates across destinations,
+with larger files first. A single large file remains one transfer; GGUF files are
+not split into byte ranges. Shared-cache aliases receive one copy, and every target
+is revalidated before launch.
+
+Progress reports aggregate and per-host logical bytes, active streams, and logical
+bytes per second. These counters include data reused by rsync; they do not measure
+network traffic. Increase stream counts only when storage and network throughput
+can benefit.
+
+## Transfer and launch guarantees
+
+Local, push, delegated and per-node pull share preparation. Delegated acquisition
+runs on the designated head and need not contact the Hub from the controller.
+Each distribution entry has its own revision, including speculative draft models.
+Required metadata failures are separate from advisory metadata budgets. Remote
+acquisition uses the pinned `huggingface_hub==2.2.0` adapter; offline manifest observation
+requires only Bash and ordinary Linux utilities, not Python or uv on targets.
+
+Copies enumerate selected snapshot entries and dereference them into regular
+snapshot files. They exclude other revisions, live blob-directory churn, locks,
+partial downloads and unrelated cache state. This representation works alongside
+classic and shared-blob HF layouts, without copying both snapshots and blobs.
+Repair stages one affected file and atomically replaces its snapshot entry; it
+never deletes a shared canonical blob. Copied files are not skipped based only
+on equal sizes when a checksum repair has identified corruption.
+
+Core holds per-cache/repository `flock` leases across acquisition and provider
+calls. An operation nonce recognizes leases reached through shared-cache aliases;
+complete aliases are omitted from transfer after observation. External downloaders
+and garbage collectors do not participate in these leases. A final observation is
+still required, and no receipt promises protection against later external changes.
+
+Standard vLLM and SGLang commands consume the prepared snapshot while retaining
+the recipe's served model name and immutable revision. Draft revision pins remain
+independent. Custom commands must consume `{model}` or the validated revision;
+a literal mutable ref cannot bypass the binding. Env `launch.model_path` and
+`launch.model_revision` consume the same binding. Hooks additionally receive
+`SPARKRUN_MODEL_PATH` (workload path, blank for controller post-commands) and the
+resolved `SPARKRUN_MODEL_REVISION`. Compilation/runtime caches remain separate
+and are not distributed with model payloads.
+
+Docker access checks run the selected image with its final UID and structured
+mounts, without GPU allocation or the image entrypoint. Local checks use the
+host execution identity. Unavailable or shadowed mounts fail before eviction.
+Custom executors need an equivalent `model_access_command` capability; raw mount
+options cannot bypass mapping checks. Delegating runtimes that own preparation
+retain that responsibility. ColdSnap native restores still bypass HF preparation
+through their asset policy; capture/safetensors preparation uses the normal path.
+
+
+## Runtime compilation caches
+
+Runtime caches hold compilation and autotuning output (torch.compile/Inductor,
+Triton, FlashInfer, and TRT-LLM), separately from model weights. Compatible launches
+reuse cache trees on the **target hosts**. `run --runtime-cache` and
+`--no-runtime-cache` override cluster/config/runtime defaults, while the recipe’s
+own runtime-cache policy and `SPARKRUN_NO_RUNTIME_CACHE` still constrain use.
+Runtime cache artifacts are not distributed as model payloads.
+
+```bash
+sparkrun run my-recipe --runtime-cache
+sparkrun setup prune-runtime-cache --cluster mylab --dry-run
+sparkrun setup prune-runtime-cache --cluster mylab --older-than 7
+```
+
+Pruning ages trees by their last-used marker. Normal launches also sweep visible
+trees unless `runtime_cache.prune.enabled: false`. Manual `--all` removes every
+selected runtime cache tree regardless of age, causing later recompilation.
+
+## Choose the right cleanup
+
+| State | Operation |
+| --- | --- |
+| Model snapshots/manifests | Inspect/repair selected files; list usage, pin revisions, and preview/apply LRU cleanup with [model-cache](/cli/model-cache/) |
+| Runtime compilation output | `setup prune-runtime-cache` on selected hosts |
+| Benchmark checkpoints/results | Preserve for resume and publication retry; see [benchmarking](/tutorials/benchmarking/) |
+| Managed plugin generations | Retention after successful plugin mutations; see [plugins](/advanced/plugins/) |
+| Workload metadata | `setup prune-job-metadata-cache --dry-run` previews local record cleanup |
+| Daemon operation journal | Separate daemon retention settings; see [daemon](/advanced/daemon/) |
+
+OCI Relay is a bundled image-distribution provider; model providers are separately
+selected capabilities. Built-in transfer policies and provider completion receipts
+still require final per-host validation. Bytes transferred never establish that
+an image imports correctly or a workload can read its model.

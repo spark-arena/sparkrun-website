@@ -11,15 +11,15 @@ sparkrun setup wizard [options]
 
 Guided interactive wizard that walks through the full cluster setup process in one session. When you run bare `sparkrun setup` and no default cluster exists, the wizard launches automatically.
 
-**Phases:**
+**Example DGX Spark plan** (actual steps depend on hardware and executor):
 
 1. **Install check** — detects whether sparkrun is installed as a uv tool; installs it if not
 2. **Cluster creation** — discovers CX7 peers (when running on a DGX Spark), prompts for hosts, creates/updates a named cluster, and sets it as default
-3. **SSH access** — every later phase assumes passwordless control→host SSH, so the wizard establishes it first: it probes each host, and for hosts that answer but reject the key it offers to install one (generating `~/.ssh/sparkrun_ed25519` if you have no identity). Runs right after the cluster-name and SSH-username prompts, before any other probe.
+3. **SSH access** — every later phase assumes passwordless control→host SSH, so the wizard establishes it first: it probes each host, and for hosts that answer but reject the key it offers to install one (reusing existing identities or generating a config-adjacent `ssh/sparkrun_ed25519` if needed). Runs right after the cluster-name and SSH-username prompts, before any other probe.
 4. **SSH mesh** — establishes passwordless SSH between all cluster hosts as well as the control machine
 5. **CX7 configuration** — detects ConnectX-7 interfaces, selects conflict-free subnets, assigns static IPs with jumbo frames (MTU 9000), and distributes host keys. If CX7 IPs are added or changed, the SSH mesh is automatically re-run to ensure full connectivity across all interfaces.
 6. **Docker group** — ensures the SSH user is in the `docker` group on all hosts so containers can run without sudo
-7. **NVIDIA CDI** — generates `/etc/cdi/nvidia.yaml` so Docker can resolve the GPU. sparkrun requests GPUs via CDI rather than `--gpus`.
+7. **GPU access** — DGX Spark Docker defaults to `gpu_access_mode: gpus`; CDI generation is only included when the resolved plan requires it.
 8. **Sudoers entries** — installs scoped sudoers rules for `fix-permissions` and `clear-cache` (no broad sudo)
 9. **earlyoom** — installs and configures OOM protection with inference-aware defaults
 
@@ -65,9 +65,7 @@ Probes each host for the things the wizard configures and reports gaps —
 **without changing anything**. Use it to verify a cluster before a first run,
 or to find what drifted after one.
 
-Checks, in order: `docker_installed`, `docker_group`, `docker_usable`,
-`nvidia_ctk`, `cdi_spec`, `host_ipc`, `earlyoom`, `sudoers`, `ssh_mesh`, `cx7`,
-`rdma`.
+Applicable checks come from the hardware/executor plan: Docker/toolkit access, GPU mode (CDI only when needed), host IPC, earlyoom, sudoers, SSH identity/mesh, CX7, and RDMA. Hard prerequisites and advisory findings have distinct outcomes.
 
 Each result is `OK`, `WARN`, `FAIL`, or `SKIP`, and a non-OK result names the
 command that would fix it. `--json` emits the same results machine-readably.
@@ -128,9 +126,10 @@ If you installed via `sparkrun setup install`, tab completion is already configu
 sparkrun update
 ```
 
-Updates sparkrun to the latest version in your managed environment and refreshes all recipe registries. Use `--no-update-registries` to skip the registry update.
-
-`sparkrun update` is a top-level alias for `sparkrun setup update`.
+Updates sparkrun within the selected channel, reconciles compatible managed
+plugins, and refreshes recipe registries. Use `sparkrun setup update
+--no-update-registries` to skip registry refresh; the top-level `sparkrun update`
+alias does not expose that option. See [Updates](/getting-started/updates/).
 
 ## SSH mesh setup
 
@@ -200,10 +199,10 @@ seconds. Add `--suite all` for the NCCL collective, which fetches the test image
 takes several minutes.
 
 :::caution
-Experimental — gated behind the `cli.setup.rdma_test` feature flag:
+The perftest suite is enabled on every channel (`cli.setup.rdma_test`). The experimental NCCL suite separately requires `cli.setup.rdma_test.nccl`, on by default only on alpha:
 
 ```bash
-sparkrun setup features enable cli.setup.rdma_test
+sparkrun setup features enable cli.setup.rdma_test.nccl
 ```
 
 Unlike `setup check`, this command sends real traffic and takes a few minutes.
@@ -383,3 +382,51 @@ sparkrun setup diagnose --cluster mylab --json
 :::note
 The base diagnostics run without elevated privileges. Use `--sudo` to also collect dmidecode data — you'll be prompted for a sudo password.
 :::
+
+## SSH server identity rotation
+
+Read-only `setup check --json` includes the shared `ssh_identity` probe/findings.
+Duplicate server keys/machine IDs are advisory; aliases with the same boot ID are
+one running machine, and missing/unreachable probes make the audit incomplete.
+Wizard `--yes` does not authorize rotation. See [SSH recovery](/getting-started/ssh-setup/#trust-handoff-and-interrupted-rotation).
+
+```bash
+sparkrun setup ssh-rotate-keys --cluster mylab --dry-run
+sparkrun setup ssh-rotate-keys --cluster mylab
+sparkrun setup ssh-rotate-keys --cluster mylab --machine-id
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--hosts` / `-H`, `--hosts-file`, `--cluster` | Select targets; controller changes only if explicitly selected |
+| `--user` / `-u` | SSH user, default cluster/config identity |
+| `--machine-id` | Also regenerate OS identity; plan a reboot afterward (not performed by Sparkrun) |
+| `--yes` / `-y` | Explicitly confirm rotation; sudo may still prompt per host |
+| `--dry-run` / `-n` | Preview without changing identities |
+
+Targets require verified SSH trust, Linux, Python 3, OpenSSH, sudo, and a reloadable
+systemd SSH service. Custom key paths/certificates require administrator handling.
+Login keys are preserved. Public key handoff uses the existing authenticated
+connection, verifies a fresh connection, and refreshes controller/peer trust and
+mesh. Other clients must refresh their own trust. The printed recovery record
+supports interrupted/partial recovery; successful hosts stay rotated if another
+host rolls back. This is not a cluster-wide atomic transaction.
+
+## Cache maintenance
+
+```bash
+sparkrun setup prune-job-metadata-cache --dry-run
+sparkrun setup prune-runtime-cache --cluster mylab --dry-run
+```
+
+| Command/options | Effect |
+| --- | --- |
+| `prune-job-metadata-cache --older-than DAYS --keep-per-intent COUNT` | Local workload YAML retention (defaults: 30 days, 3 records per identity); `--older-than 0` ignores age |
+| `prune-runtime-cache --cluster NAME --older-than DAYS` | Last-used age sweep of compilation/autotuning output on target hosts |
+| `prune-runtime-cache --all` | Remove all selected runtime trees regardless of age |
+| `--dry-run` on either | Preview removal without deleting |
+
+Manual metadata pruning has no live occupancy snapshot and can remove metadata
+for long-lived deployments. Inspect `status` and the dry run first. These commands
+do not repair model weights or delete plugin generations/benchmark checkpoints.
+See [Model Cache Management](/advanced/cache-management/).

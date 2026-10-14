@@ -8,9 +8,9 @@ hidden branches. A flag's default can vary per release channel, so an
 experiment can be on for `alpha` users while staying off for `stable` — no code
 change per release.
 
-Every flag currently shipped is **off on every channel** unless the table below
-says otherwise, so a stock install behaves exactly as if the experiments
-weren't there.
+Flags control capability execution or help visibility. Plugin loading is managed
+separately with `sparkrun plugins enable/disable`. The defaults below are for
+0.4.0; a flag never installs or enables its parent plugin or qualifies new hardware.
 
 ## Managing flags
 
@@ -26,16 +26,12 @@ sparkrun setup features disable executor.local
 sparkrun setup features reset executor.local
 ```
 
-`list` prints the resolved value and where it came from — `env`, `config`, or
-`channel`:
-
-```
-Feature channel: stable
-
-cli.setup.tailscale    off  (channel)  Experimental 'sparkrun setup tailscale' command group
-executor.local         off  (channel)  Experimental native (no-container) executor
-executor.docker        on   (channel)  Default Docker executor (enabled on all channels; disable to drop docker where it isn't needed)
-```
+`list` labels its columns `FEATURE`, `STATE`, `SOURCE`, `OWNER`, and
+`DESCRIPTION`. State is the effective capability value; source explains its
+origin (`env`, `config`, or `channel`), and owner identifies the declaring plugin
+or core. Disabled plugins' static declarations remain discoverable. Setup-step
+flags are omitted unless you use the hidden `--all` option. `--json` includes
+resolved values, overrides, ownership, and channel information.
 
 :::note
 The `setup features` group is hidden from `sparkrun setup --help` on the
@@ -45,19 +41,49 @@ functional there — the flag only controls whether the group is advertised.
 
 ## Built-in flags
 
-| Flag | Default | What it gates |
-|---|---|---|
-| `executor.docker` | **on** (all channels) | The default Docker executor. Disable only to drop Docker where it isn't needed. |
-| `gateway.litellm` | **on** (all channels) | The LiteLLM gateway behind `sparkrun proxy`. |
-| `executor.local` | off | The experimental native (no-container) [executor](/advanced/executors/). |
-| `cli.setup.tailscale` | off | The `sparkrun setup tailscale` command group. |
-| `core.external_plugins` | off | Loading [out-of-tree plugins](/advanced/plugins/) from `plugins.paths`. |
-| `cli.setup.features` | on for `beta`/`alpha`, off for `stable` | Visibility only — whether `setup features` appears in `--help`. |
+| Flag | Stable | Beta | Alpha | Purpose |
+| --- | --- | --- | --- | --- |
+| `executor.docker` | on | on | on | Docker executor |
+| `gateway` | on | on | on | Shared gateway capability gate |
+| `gateway.litellm` | on | on | on | Bundled default gateway |
+| `cli.tune` | on | on | on | Runtime kernel tuning |
+| `cli.setup.wizard`, `setup.steps.*` | on | on | on | Hardware/executor-scoped setup steps |
+| `cli.setup.rdma_test` | on | on | on | perftest RDMA traffic tests |
+| `builder.uv_venv` | off | on | on | Host-side Python environment preparation |
+| `cli.setup.features` | off | on | on | Help visibility only; command always callable |
+| `daemon` | off | off | on | Optional durable HTTP/SSE service |
+| `executor.k8s`, `cli.setup.k8s`, `api.run.k8s` | on | on | on | Kubernetes capabilities; require the `k8s` plugin to be loaded |
+| `cli.setup.rdma_test.nccl` | off | off | on | Experimental NCCL collective test suite |
+| `gateway.sparkroute` | off | off | off | Opt-in on every channel; requires separately installed SparkRoute plugin |
+| `executor.local` | off | off | off | Experimental native execution |
+| `cli.setup.tailscale` | off | off | off | Tailscale setup commands |
+| `core.external_plugins` | off | off | off | Managed/manual external plugin loading |
 
-`sparkrun setup features list` is the authoritative list for your install. It
-will show additional flags beyond this table: ones belonging to backends still
-in development, and any registered by [external plugins](/advanced/plugins/).
-Those are undocumented on purpose — they are not ready to be relied on.
+Setup step flags cover `docker`, `docker_group`, `nvidia_container`, `nvidia_cdi`,
+`host_ipc`, `earlyoom`, `sudoers`, `ssh_identity`, `ssh_mesh`, `cx7`, and `rdma`.
+Enabled steps still require an applicable hardware/executor plan.
+
+`SPARKRUN_ADVANCED=1` exposes advanced help such as [model-cache](/cli/model-cache/);
+it does not enable capability flags. `plugins add` can enable the external-loader
+gate after source consent; `--enable` separately enables plugin loading.
+
+Bundled LiteLLM, OCI Relay, and Arena plugins load by default on every channel.
+The `k8s` and `lil` plugins default to alpha only; installed integrations require
+selection. Use `plugins enable k8s` to load Kubernetes on stable/beta. Capability
+flags still apply once a plugin is loaded. Legacy whole-plugin flags such as
+`integration.k8s`, `registry.lil`, `integration.arena`, `plugins.oci_relay`, and
+`plugins.coldsnap` remain migration inputs, but no longer appear in the feature
+list. Explicit `plugins.enabled` overrides take precedence.
+
+LiteLLM is the default gateway. Explicitly running
+`setup features enable gateway.sparkroute` selects SparkRoute, even if its
+capability was already enabled. It requires that plugin to be loaded and the
+shared `gateway` gate to be on. Other providers' flags remain unchanged;
+`features reset` does not select a gateway. See [plugins](/advanced/plugins/)
+and [proxy](/cli/proxy/).
+
+`setup features list` is authoritative for the installed package and profile.
+MCP is disabled and has no registered command/service entry point.
 
 ## Resolution order
 
@@ -98,3 +124,7 @@ silently degrading:
 
 Teardown is deliberately *not* gated: a workload launched while a flag was on
 stays stoppable after you turn the flag off.
+
+Disabling `gateway` hides gateway help and rejects new gateway work. Status, stop,
+service status, and service removal remain available for recovery. Disabling a
+selected provider does not automatically select a replacement.

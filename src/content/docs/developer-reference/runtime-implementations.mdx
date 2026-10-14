@@ -1,0 +1,303 @@
+---
+title: Runtime Implementations
+description: Implement a RuntimePlugin with command generation, hardware and image policies, readiness, logs, and multi-node orchestration.
+---
+
+A runtime translates a recipe into commands and lifecycle behavior for an inference
+engine. Implement `RuntimePlugin` from `sparkrun.runtimes.base`, give it a unique
+`runtime_name`, and expose the class through a selected plugin module.
+[Plugin Development](/developer-reference/plugin-development/) covers packaging,
+API declarations, feature gates, and registration.
+
+## Responsibilities
+
+| Layer | Owns |
+| --- | --- |
+| Runtime | Engine flags, parallelism semantics, API capabilities, environment, log locations, and engine-specific lifecycle |
+| Builder | Preparing an image or host environment; see [Builders](/developer-reference/builders/) |
+| Scheduler | Assigning ranks to compatible hosts and accelerators |
+| Distribution | Staging and verifying images and model artifacts on each required host |
+| Executor | Creating, inspecting, reading logs from, and stopping workloads at resolved destinations |
+| Frontend | Confirmation, presentation, and whether to wait for readiness or follow logs |
+
+The standard launch pipeline connects these layers. Extend its hooks so that
+recipes retain trust checks, model validation, environment templates, cache mounts,
+and teardown behavior. A custom launch path must preserve those contracts itself.
+See [Execution Flow](/developer-reference/execution-flow/).
+
+## A minimal single-GPU runtime
+
+This adapter illustrates a hypothetical `example-serve` executable that accepts
+Hugging Face model IDs or local paths and a `--revision` flag. Replace the engine
+flags and supply a compatible container image for your implementation. It uses
+the base solo launch/stop paths and rejects distributed parallelism.
+
+Put this in `example_runtime/plugin.py`, with a side-effect-free package
+`__init__.py`:
+
+```python
+import shlex
+
+from sparkrun.runtimes.base import RuntimePlugin
+
+SPARKRUN_PLUGIN_API_VERSION = 1
+
+_FLAGS = {
+    "host": "--host",
+    "port": "--port",
+    "max_model_len": "--context-length",
+    "served_model_name": "--served-model-name",
+    "model_revision": "--revision",
+}
+
+
+class ExampleRuntime(RuntimePlugin):
+    runtime_name = "example-runtime"
+    requires_capability = frozenset({"cuda"})
+
+    def known_config_keys(self):
+        return frozenset(_FLAGS)
+
+    def serve_flag_map(self):
+        return _FLAGS
+
+    def model_revision_flags(self):
+        return ("--revision",)
+
+    def world_size(self, parallelism, *, recipe, cluster):
+        if (parallelism.total_gpus != 1
+                or parallelism.expert_parallel != 1
+                or parallelism.context_parallel != 1):
+            raise ValueError("example-runtime supports one GPU on one host")
+        return 1
+
+    def validate_recipe(self, recipe):
+        issues = super().validate_recipe(recipe)
+        if recipe.min_nodes and recipe.min_nodes > 1:
+            issues.append(self.recipe_error("requires a single host"))
+        return issues
+
+    def get_common_env(self):
+        return {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+
+    def generate_command(self, recipe, overrides, is_cluster,
+                         num_nodes=1, head_ip=None, skip_keys=frozenset()):
+        if is_cluster or num_nodes != 1:
+            raise ValueError("example-runtime does not support cluster launch")
+        config = recipe.build_config_chain(overrides)
+        rendered = recipe.render_command(config)
+        if rendered:
+            return self.strip_flags_from_command(rendered, skip_keys, _FLAGS)
+
+        argv = ["example-serve", "--model", str(config.get("model"))]
+        defaults = {"host": "0.0.0.0", "port": 8000}
+        for key, flag in _FLAGS.items():
+            value = config.get(key, defaults.get(key))
+            if key not in skip_keys and value is not None:
+                argv.extend([flag, str(value)])
+        return shlex.join(argv)
+```
+
+`generate_command()` is abstract: a runtime without it cannot be instantiated or
+discovered. It must return a nonempty shell command string. Here `shlex.join`
+quotes literal arguments, including paths and served names containing spaces.
+Command generation should not launch processes, acquire resources, or print output.
+
+Expose the module in your installed package's `pyproject.toml`:
+
+```toml
+[project.entry-points."sparkrun.plugins"]
+example-runtime = "example_runtime.plugin"
+```
+
+Select it before application initialization:
+
+```yaml
+plugins:
+  enabled:
+    example-runtime: true
+```
+
+The loader discovers the concrete subclass; no `register(v)` callback is needed
+for this class alone. The Python entry-point group is `sparkrun.plugins`;
+`sparkrun.runtime` is the internal extension identifier. See
+[plugin packaging and selection](/developer-reference/plugin-development/#package-and-register-a-plugin)
+for the full package metadata and configuration contract.
+
+A recipe selects the runtime by name. The image below is a placeholder for your
+engine image, not a published example:
+
+```yaml
+recipe_version: "2"
+model: Qwen/Qwen3-0.6B
+runtime: example-runtime
+container: your-registry/example-engine:your-tag
+max_nodes: 1
+defaults:
+  port: 8000
+  max_model_len: 4096
+```
+
+## Command generation and validation
+
+Build the effective configuration with `recipe.build_config_chain(overrides)`.
+Read the passed overrides even when regenerating commands per node: they can carry
+validated model revisions as well as CLI settings. Honor a recipe's `command`
+through `recipe.render_command(config)` if your runtime supports templates.
+Literal flags in templates do not automatically follow config overrides; use
+placeholders for configurable values and test your reconciliation rules.
+
+The example maps `model_revision` to the engine's revision flag so a repository
+loader consumes the validated snapshot. A template using `{model}` can receive
+the prepared workload path. Custom commands must consume that path or the verified
+revision; fetching a mutable default revision would bypass the prepared artifact.
+Declare your engine's revision flags with `model_revision_flags()`.
+
+| Hook/helper | Contract |
+| --- | --- |
+| `known_config_keys()` | Keys the runtime actually consumes; `None` leaves them undeclared. Shared core keys need not be repeated. |
+| `serve_flag_map()` | Config-key-to-engine-flag mapping used by recipe validation. It does not generate commands automatically. |
+| `build_flags_from_map()` | Optional generation helper for mapped values, boolean toggles, negatable flags, and shell-quoted JSON values. It leaves ordinary strings unquoted; apply an appropriate quoting policy. |
+| `strip_flags_from_command()` | Remove mapped `skip_keys` from a rendered template; also honor those keys when generating flags. |
+| `validate_recipe()` | Extend the base findings. Use `recipe_error()` for unsupported configurations and `recipe_warning()` for portability problems. Bare strings are suggestions, not launch-blocking errors. |
+| `prepare(recipe, hosts, config=None, dry_run=False, transfer_mode="auto", overrides=None)` | Runtime preparation and target-dependent checks; returns `None`. Honor dry-run and effective overrides. This is separate from a builder's `prepare()` signature. |
+
+Declare only supported engine flags and capability combinations. Unknown-key
+reporting is useful precisely because a dropped setting can otherwise look like
+it took effect.
+
+## Hardware, images, and executor defaults
+
+`requires_capability` lists capabilities or accelerator model names that **every
+placed host** must satisfy. The example requires CUDA; use more specific
+requirements when an engine or image needs a particular device family.
+
+`resolve_container(recipe, host_hardware=...)` preserves an explicit recipe image,
+then calls `default_image_for(host_hardware)`. Customize the latter when your
+runtime owns a qualified default. The base implementation looks for a common
+platform-qualified image across the host's accelerators; `default_image_prefix`
+alone does not provide a fallback. Requiring an explicit image is valid.
+
+Per-host image planning also honors `containers:`. Set
+`supports_heterogeneous_images = True` only after verifying that different images
+can communicate correctly across ranks. Its default is false, and a transforming
+builder still needs a compatible common source image.
+
+`default_executor()` and `default_executor_config()` provide overridable runtime
+preferences. Preserve the executor supplied by the launch plan instead of creating
+an independent Docker client or choosing another destination. Supporting the
+portable controller does not establish native GPU support on that controller's OS.
+See [Executors](/advanced/executors/) and [Multiplatform](/advanced/multiplatform/).
+
+## Readiness, API discovery, and logs
+
+Declare what the engine supports; the executor determines which observations it
+can perform. Recipe/config settings choose the readiness policy.
+
+| Declaration/hook | Purpose |
+| --- | --- |
+| `readiness_health_path` | HTTP health path, or `None` when none is declared |
+| `readiness_styles` | Ordered supported inference probes; empty by default |
+| `native_api_options()`, `native_apis(recipe)` | Supported and configured serving APIs for discovery; these are declarations, not probe results |
+| `resolve_api_key(recipe, overrides=None)` | Return configured upstream credentials for health/discovery when the engine requires them; the base returns `None` |
+| `log_sources(cluster_id, hosts, *, is_solo=False, scope=...)` | Return `LogSource` records describing host, role/rank, stdout or file mode, and path; the executor reads them |
+
+Supported inference styles are `OPENAI_CHAT_STREAM`, `OPENAI_RESPONSES_STREAM`, and
+`ANTHROPIC_MESSAGES_STREAM` from `sparkrun.core.readiness`. Only declare protocols
+the engine implements. vLLM declares all three; SGLang declares streaming Chat
+Completions. The example leaves inference observers undeclared. Missing observers
+must not produce invented first-token or inference timings.
+
+The base solo path records serving output in a managed file. If your engine writes
+elsewhere or starts worker processes differently, update log sources and naming
+consistently so both `logs` and startup following work. Return descriptors rather
+than printing or attaching to logs during discovery. See [run](/cli/run/) for the
+CLI's readiness and detachment policy.
+
+These sources also power reusable `api.open_log_target()` targets, bounded
+[diagnostic capture](/developer-reference/diagnostics-api/), and daemon streams.
+The public logging selector is `workload_id` (the value in `RunResult.cluster_id`);
+existing runtime hook signatures retain `cluster_id`. Native executors can resolve
+resource-aware sources with pod UID/container-instance identity. Keep transport
+stderr separate from workload output, and honor full-history, cancellation, and
+nonzero reader exit semantics in executor `read_logs_cmd()` implementations.
+See [Logging API](/developer-reference/logging-api/) for the consumer contract.
+
+## Environment, hooks, and runtime caches
+
+Use `get_common_env()`, `get_solo_env()`, and `get_cluster_env(head_ip, num_nodes)`
+for engine defaults. `get_extra_env()` supplies the mounted Hugging Face cache
+locations by default; merge the base values when adding to them.
+`get_extra_volumes()` declares additional mounts, while `get_extra_docker_opts()`
+is for Docker-specific launch requirements.
+
+An override of `_pre_serve(...)` must call `super()._pre_serve(...)` to retain
+recipe `pre_exec` hooks and mods. Shared launch paths propagate the operation's
+trust and hook context. They also render recipe environment templates after
+assets and cache mounts are prepared. If replacing those paths, preserve the
+prepared launch context and the same rendered environment for workload creation
+and serve execution.
+
+Declare persistent compilation paths through `runtime_cache_paths(*,
+fingerprint="")`, mapping environment-variable names to
+`sparkrun.core.runtime_cache.CachePath` values relative to the cache mount.
+`runtime_cache_defaults()` can request image-specific keying. Single-file caches
+without their own compatibility validation may need the serve fingerprint in
+the filename; directory keying alone does not prove cache compatibility.
+See [Model Cache Management](/advanced/cache-management/) and
+[Structured Feedback](/developer-reference/feedback/) for cleanup and progress.
+
+## Multi-node implementations
+
+`world_size(parallelism, *, recipe, cluster)` supplies the rank count to scheduling.
+The base uses `tp × pp × dp`; override it when your engine's semantics differ.
+Rank count and host count can differ on multi-GPU hosts. Use the supplied placement
+when mapping ranks to hosts rather than assuming `hosts[rank]` always applies.
+
+The base implements solo execution, but its `_run_cluster()` and `_stop_cluster()`
+raise `NotImplementedError`. Returning `"native"` from `cluster_strategy()` does
+not by itself implement multi-node lifecycle.
+
+For a native distributed engine, implement:
+
+1. `cluster_strategy()` returning `"native"`.
+2. `generate_node_command(recipe, overrides, head_ip, num_nodes, node_rank,
+   init_port=25000, skip_keys=frozenset(), hosts=None, placement=None)` with the
+   correct per-rank commands and API binding on the appropriate rank.
+3. `managed_rendezvous_flags()` for coordination flags supplied by sparkrun, so
+   recipe validation can identify duplicated bootstrap flags.
+4. Cluster launch and stop hooks, preserving the passed executor, transport,
+   placement, trust, runtime cache, and prepared resource context.
+
+Built-in native runtimes compose `_run_native_cluster()` and
+`_stop_native_cluster()`. These are implementation helpers: follow the signatures
+of the targeted sparkrun version. Use resolved communication settings;
+`finalize_host_comm_env()` can derive engine-specific values from each host's
+final environment without mutating its input. Ray, MPI, and RPC engines need their
+own orchestration and log/teardown behavior.
+
+## Testing and implementation examples
+
+Start with offline command and contract tests:
+
+- Register a selected plugin in isolated config without console output, network
+  access, or eager CLI imports.
+- Exercise defaults, overrides, explicit templates, skipped flags, quoting, and
+  immutable model revisions. Assert that recipe declarations remain unchanged.
+- Reject unsupported parallelism and incompatible image/hardware combinations
+  before submission; check solo and cluster paths separately.
+- Mock executors and transport for dry-run, partial failures, log sources, and
+  teardown. Check readiness capability declarations and cancellation behavior.
+
+Then qualify the engine, image, and target hardware together. A command-generation
+test does not establish live GPU or multi-node compatibility.
+
+Use these built-in implementations as references:
+
+| Implementation | Useful pattern |
+| --- | --- |
+| [RuntimePlugin base](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/base.py) | Required command hook, shared solo lifecycle, validation, logs, and caches |
+| [Modular MAX](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/modular_max.py) | Single-host placement and local-GPU validation |
+| [SGLang](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/sglang.py) | Native multi-node commands and readiness declarations |
+| [vLLM distributed](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/vllm_distributed.py) | Placement-aware rank commands and communication environment |
+| [llama.cpp](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/llama_cpp.py) | GGUF model paths, RPC workers, and custom log naming |

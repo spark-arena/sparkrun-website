@@ -42,7 +42,7 @@ The output includes:
 - **Model** — the HuggingFace model ID (e.g., `Qwen/Qwen3-1.7B`)
 - **Runtime** — the inference engine (e.g., `vllm`)
 - **Container** — the Docker image that will be pulled
-- **VRAM estimate** — whether the model fits DGX Spark's 128 GB unified memory at the current tensor parallelism
+- **VRAM estimate** — estimated weights/cache demand at the selected parallelism; unknown/lower-bound estimates do not guarantee fit
 
 :::tip
 The VRAM estimate helps you decide whether a model needs multiple nodes. If the estimate exceeds 128 GB at TP=1, you'll need multi-node tensor parallelism. See the [Multi-Node tutorial](/tutorials/multi-node/) for details.
@@ -67,13 +67,13 @@ sparkrun will:
 1. **Pull the container image** to the target host (skipped if already present)
 2. **Download and sync the model** from HuggingFace (skipped if already cached)
 3. **Launch the inference container** in detached mode
-4. **Stream container logs** so you can watch the server start up
+4. **Stream startup logs and check readiness**, then return after required hooks
 
 You'll see log output from the inference engine as it loads the model and starts serving.
 
 ## 4. Ctrl+C is safe
 
-Once you see the server is ready (look for a message like `Uvicorn running on ...`), you can press **Ctrl+C** at any time.
+By default the command returns when readiness is confirmed; a server log line alone is not the readiness contract. Use `--follow` to keep watching afterward, `--no-follow` to wait without model logs, or `--no-ready-wait` for submission-only behavior. While observing a detached workload, **Ctrl+C** detaches. A timeout can leave the workload running; inspect its status/logs. See [run](/cli/run/#readiness-and-exit-status).
 
 :::caution
 Ctrl+C only detaches you from the log stream — it **never** kills the inference job. Your model keeps serving in the background.

@@ -43,6 +43,9 @@ sparkrun benchmark qwen3-1.7b-vllm --solo -b depth=0,4096,16384 -b concurrency=1
 # Override recipe options (use -o for recipe overrides like gpu_memory_utilization)
 sparkrun benchmark qwen3-1.7b-vllm --solo -o gpu_memory_utilization=0.9
 
+# Benchmark and submit to Spark Arena (after sparkrun arena login)
+sparkrun benchmark qwen3-1.7b-sglang --arena
+
 # Dry run — shows what would be done
 sparkrun benchmark qwen3-1.7b-vllm --solo --dry-run
 ```
@@ -80,7 +83,6 @@ Each step can be controlled independently:
 | `--output`                   | Output file for results YAML                             |
 | `-b` / `--benchmark-option`  | Override benchmark args: `-b key=value` (repeatable)     |
 | `--api-key-env`              | Name of the env var to read the API key from (e.g. `OPENAI_API_KEY`) |
-| `--exit-on-first-fail` / `--no-exit-on-first-fail` | Abort on first benchmark failure (default: enabled) |
 | `--no-stop`                  | Don't stop inference after benchmarking                  |
 | `--skip-run`                 | Skip launching inference (benchmark existing instance)   |
 | `--sync-tuning`              | Sync tuning configs from registries before benchmarking  |
@@ -88,8 +90,26 @@ Each step can be controlled independently:
 | `--timeout`                  | Benchmark timeout in seconds (default: 14400, or from the profile) |
 | `--fresh`                    | Force a fresh start, deleting any prior state            |
 | `--resume`                   | Resume prior state without prompting (mutually exclusive with `--fresh`) |
-| `--arena`                    | Run the opinionated [Spark Arena](/tutorials/spark-arena/) flow and submit results |
+| `--arena`                    | Submit results to [Spark Arena](/tutorials/spark-arena/); requires `sparkrun arena login` |
 | `--dry-run` / `-n`           | Show what would be done without executing                |
+
+## Spark Arena submission
+
+Use `sparkrun benchmark <recipe> --arena` to benchmark and submit results:
+
+```bash
+sparkrun arena login
+sparkrun benchmark qwen3-1.7b-sglang --arena --cluster mylab
+```
+
+`--arena` selects the Arena integration and defaults to
+`@official/spark-arena-v2` for real submissions. An explicit `--profile` takes precedence. The option also works with `benchmark perf`.
+
+Use `sparkrun arena status` and `sparkrun arena logout` to manage authentication.
+To resume a saved Arena run or retry its upload, use
+`sparkrun benchmark resume <benchmark-id>`; the saved integration and submission
+ID are restored. See [Benchmark on Spark Arena](/tutorials/spark-arena/) for the
+complete workflow.
 
 ## Benchmark configuration
 
@@ -176,7 +196,10 @@ The output filename is auto-generated as `benchmark_<recipe>_<profile>_tp<N>.yam
 
 Multi-task benchmark runs (a profile with several `pp`/`tg`/`depth`/`concurrency` combinations) are driven by a small scheduler that persists progress between tasks. State is checkpointed after each task, so an interrupted run can be resumed without re-executing completed tasks — useful when a long sweep is killed by a transient failure, an OOM, or `Ctrl+C` mid-sweep.
 
-`--exit-on-first-fail` (default) stops the sweep on the first task failure so the issue can be addressed before more compute is spent; `--no-exit-on-first-fail` keeps marching through remaining tasks. State files live under `~/.cache/sparkrun/benchmarks/`.
+By default, the sweep stops on the first failed task. Completed tasks with usable
+artifacts are retained for resume; failed or unusable results must be retried.
+An incomplete schedule fails and does not trigger successful publication.
+State files live under `~/.cache/sparkrun/benchmarks/`.
 
 An interactive run prompts before resuming. For non-interactive use, decide up
 front:
@@ -229,3 +252,22 @@ sparkrun benchmark my-recipe --solo \
 :::note
 You can always run benchmarking tools like llama-benchy independently outside of sparkrun. The purpose of integrating benchmarking into sparkrun is to make the process more accessible and to help drive standardization through shared benchmark profiles.
 :::
+
+## Progress, provenance, and finalization
+
+New tool-eval-bench runs default to v2.8.0. Scenario verdicts, points, duration and
+final failure kinds are visible, but one suite remains one resumable task. Unknown
+or multi-trial totals do not have a percentage. Saved benchmark refs are reused;
+a new default version does not silently relabel old measurements. Partial graded
+outcomes retain completion/exclusion information; infrastructure-only runs stay
+failed/resumable. llama-benchy emits task-level feedback, not per-scenario events.
+
+Fresh launches share `run` placement and readiness presentation. `--skip-run`
+requires matching saved deployment/provenance; endpoint reachability alone is
+insufficient. Startup timings are omitted for launches the benchmark did not observe.
+
+Validated measurements and export/publication are separate stages. Retain the
+benchmark ID after a finalization failure; completed-state publication retry does
+not remeasure or regenerate failed optional exports. Credentials are resolved at
+execution time and must not be embedded in saved arguments/checkpoints. See
+[Benchmark API](/developer-reference/benchmark-api/).

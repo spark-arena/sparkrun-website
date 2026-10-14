@@ -119,3 +119,14 @@ command: |
 
 - **`tokenizer_path`** — GGUF files don't bundle tokenizer configs, so you must point to the original / non-GGUF HuggingFace repo (e.g. `Qwen/Qwen3.5-397B-A17B`)
 - Model field uses the same `repo:quant` syntax as llama-cpp GGUF recipes (e.g. `unsloth/Qwen3.5-397B-A17B-GGUF:Q6_K`)
+
+## Startup and cache policy
+
+SGLang declares a streaming Chat Completions readiness probe and `/health`.
+Default `run` returns after supported readiness checks and required hooks; use
+`--follow` to continue observing logs. See [run](/cli/run/).
+
+On DGX Spark, sparkrun supplies `gpu_memory_utilization: 0.80` only when the
+recipe and overrides leave it unset. That does not change the separate
+[scheduler’s 0.90 cap](/advanced/schedulers/). Model inventory and runtime
+compilation caches have separate [validation and cleanup](/advanced/cache-management/).

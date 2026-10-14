@@ -34,7 +34,7 @@ sparkrun cluster check-job my-recipe --check-http-models
 
 ## Idempotent launches
 
-The `--ensure` flag makes `sparkrun run` idempotent — if the workload is already running with the same configuration, it's a no-op:
+The `--ensure` flag makes `sparkrun run` idempotent — if the workload is already running with the same configuration, it reuses that deployment and waits for readiness without rerunning hooks:
 
 ```bash
 sparkrun run qwen3-1.7b-vllm --ensure
@@ -46,9 +46,9 @@ This is useful in scripts and cron jobs where you want to guarantee a workload i
 
 | Flag | Effect |
 |---|---|
-| `--no-follow` | Launch without following logs |
+| `--no-follow` | Suppress model logs; still wait for readiness |
 | `--no-rm` | Keep containers after the workload stops (useful for log inspection) |
-| `--ensure` | Idempotent launch — skip if already running |
+| `--ensure` | Reuse matching launch intent; still check readiness |
 | `--dry-run` / `-n` | Show what would be done without executing |
 
 ```bash
@@ -104,7 +104,8 @@ When a workload is managed by systemd, always use `systemctl stop sparkrun-<name
 |---|---|
 | `0` | Success |
 | `1` | General error |
-| `2` | Invalid arguments or missing recipe |
+| `2` | Invalid arguments, including conflicting readiness flags |
+| `130` | Ctrl+C while observing a detached workload; it remains running |
 
 ## Verbosity and quiet mode
 
@@ -130,7 +131,7 @@ sparkrun -vv setup ssh --cluster mylab
 ```
 
 :::tip
-For persistent post-mortem debugging, `--collect-diagnostics` captures **all** log output (DEBUG level) into an NDJSON file regardless of console verbosity. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics).
+For persistent post-mortem debugging, `--collect-diagnostics` captures operation-attributed DEBUG and higher logs into a bounded NDJSON file independently of console verbosity. Existing handlers and explicit named-logger thresholds retain their filtering. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics).
 :::
 
 ## Run diagnostics
@@ -141,7 +142,7 @@ When debugging a failed launch or performance issue, capture the full run lifecy
 sparkrun run my-recipe --collect-diagnostics run_diag.ndjson
 ```
 
-This records recipe resolution, phase timing, SSH commands, container logs, health checks, and errors into a structured NDJSON file. The diagnostics file captures all log output at DEBUG level even when the console shows default (quiet) output.
+This captures planning, phase timings, bounded workload log tails, feedback, and errors. Plugin sections can add existing in-memory evidence. Capture does not include unrelated operations; all records share redaction and size limits. See [Diagnostics API](/developer-reference/diagnostics-api/) for Python and daemon capture.
 
 See [Diagnostics](/getting-started/diagnostics/) for the full record type reference and processing examples.
 
@@ -164,7 +165,6 @@ For SSH user configuration, use `sparkrun cluster create --user` or `--user` on 
 ```bash
 #!/bin/bash
 sparkrun run my-recipe --no-follow
-sleep 10
 sparkrun cluster check-job my-recipe --check-http-models
 ```
 
@@ -175,3 +175,16 @@ sparkrun cluster check-job my-recipe --check-http-models
 # Idempotent — safe to run repeatedly
 sparkrun run my-recipe --ensure --no-follow
 ```
+
+## Submission and daemon automation
+
+Default `run` success means readiness/required hooks completed. Use
+`--no-ready-wait` explicitly when a script only needs launch completion; it does
+not prove model readiness. Foreground systemd units retain workload-lifetime
+behavior. API callers have their [own submit-oriented contract](/developer-reference/python-api/).
+
+For remote durable operations, use the [optional daemon](/advanced/daemon/) with
+a token file, idempotency keys, explicit prompt handling, and separate feedback/log
+streams. Ordinary CLI remains direct. `SPARKRUN_DAEMON=auto` only opts recipe
+listing/search and JSON cluster status into read-only passthrough. Do not retry
+an uncertain submitted mutation locally.

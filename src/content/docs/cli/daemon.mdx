@@ -1,0 +1,154 @@
+---
+title: sparkrun daemon
+description: Daemon lifecycle, secure connections, operation requests, jobs, and recovery commands.
+---
+
+The optional daemon is enabled on alpha and opt-in on stable/beta. Normal CLI
+commands execute directly. See [Daemon Mode](/advanced/daemon/) for operation
+semantics, storage, platform limits, and recovery.
+
+```bash
+sparkrun setup features enable daemon
+sparkrun daemon start
+sparkrun daemon status
+sparkrun daemon stop
+```
+
+## Connection options
+
+Put these **before** `call`, `status`, or `jobs`:
+
+```bash
+sparkrun daemon --url https://controller:8443 --token-file /private/daemon.token   --ca-cert /private/ca.pem status
+sparkrun daemon --socket /private/path/api.sock jobs list
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--config FILE` | Local application/config binding |
+| `--url TEXT` | Explicit HTTP(S) origin, without credentials, path prefix, query, or fragment |
+| `--socket FILE` | Explicit local Unix socket (not remote transport; Windows uses TCP) |
+| `--token-file FILE` | Plain-text bearer token, optional final newline; not connection JSON |
+| `--token TEXT` | Bearer token in arguments; prefer the token file |
+| `--ca-cert FILE` | Trusted CA bundle for HTTPS; verification remains enabled |
+
+Endpoint selectors are mutually exclusive with each other and `--config`. Token
+options are mutually exclusive. Without explicit credentials, URL clients use
+`SPARKRUN_DAEMON_TOKEN`; local discovery/Unix connections do not. Explicit endpoint
+failures never fall back to a local daemon or resubmit a mutation. Local lifecycle,
+`token`, `systemd`, and `resources` reject client connection options.
+
+## Service lifecycle
+
+| Command | Behavior/options |
+| --- | --- |
+| `start` | Background API for the selected local binding |
+| `serve` | Foreground API; independently supervised workers can outlive it |
+| `status` | Identity/runtime state without external plugin loading |
+| `restart` | Restart API and adopt verified surviving workers |
+| `stop` | Stop API only |
+| `stop --cancel-jobs --timeout 30` | Drain admission and await cancellation first; timeout leaves API available |
+
+### serve options
+
+| Option | Meaning |
+| --- | --- |
+| `--unix` / `--no-unix` | Linux peer-authenticated socket (default on Linux); TCP elsewhere |
+| `--tcp HOST:PORT` | Bearer-authenticated TCP, including loopback; port 0 chooses an OS-assigned port |
+| `--tls-cert FILE`, `--tls-key FILE` | Matching TLS certificate/key for remote TCP |
+| `--allow-insecure` | Explicit plaintext remote TCP opt-in; bearer tokens and content are unencrypted |
+| `--allow-request-trust` | Permit TCP operate clients to explicitly authorize recipe hooks |
+| `--conn-file FILE` | Exclusively create a private local discovery file containing an ephemeral credential |
+| `--parent-pid INTEGER` | Stop a GUI-owned API when its verified parent exits |
+| `--worker-supervisor process\|systemd` | Worker supervision; default `process`, user service requires `systemd` |
+
+```bash
+sparkrun daemon serve --no-unix --tcp 127.0.0.1:0
+sparkrun daemon serve --tcp 0.0.0.0:8443   --tls-cert /private/server.crt --tls-key /private/server.key
+```
+
+TLS is required for a remote bind unless explicitly overridden by
+`--allow-insecure`; authentication is always required. Do not disable client
+certificate/hostname verification. Local recovery uses a separate authenticated
+loopback listener when needed.
+
+## Requests and jobs
+
+```bash
+sparkrun daemon call catalog.clusters
+sparkrun daemon call workloads.run --data '{"recipe":"my-recipe","cluster":"mylab"}'   --idempotency-key launch-mylab-001 --wait
+sparkrun daemon jobs list
+sparkrun daemon jobs show JOB_ID
+sparkrun daemon jobs events JOB_ID --after 12
+sparkrun daemon jobs answer JOB_ID
+sparkrun daemon jobs cancel JOB_ID
+```
+
+| Option | Meaning |
+| --- | --- |
+| `call --data JSON` | Request object (default `{}`); credentials go through prompts |
+| `call --idempotency-key TEXT` | Reuse only for the identical request/principal |
+| `call --wait` | Poll result and render prompts; does not consume the event stream |
+| `jobs events --after INTEGER` | Replay retained events after a cursor and follow completion |
+
+A complete HTTP workflow uses these release schemas:
+
+| Request | Response/use |
+| --- | --- |
+| `GET /v1/ops` | Names, permissions, execution classes, `http_path` aliases, and request/result schemas |
+| `POST /v1/workloads/run` with `{"recipe":"my-recipe","cluster":"mylab"}` | HTTP 202 with `{"job_id":"…","events_url":"/v1/jobs/…/events"}` |
+| `GET /v1/jobs/JOB_ID` | Job `state`, `result`, `error`, and pending `prompt` |
+| `POST /v1/jobs/JOB_ID/input` with `{"prompt_id":"…","value":true}` | Send a frontend-approved boolean decision to the live worker |
+| `GET /v1/jobs/JOB_ID/events` | SSE operation feedback; `Last-Event-ID` replays retained history |
+| `DELETE /v1/jobs/JOB_ID` | Request cooperative cancellation |
+
+`/v1/workloads/run` is an alias of `/v1/ops/workloads.run` with the same request and job behavior.
+Other core operations have convenient URLs such as `/v1/cluster/create`;
+see [Daemon API](/developer-reference/daemon-api/) for all operations, arguments,
+permissions, and result contracts.
+
+Use the actual `prompt.prompt_id`; secret prompts need a string `value` and
+independent secret permission. Obtain the user's answer before submission.
+Decision/approval defaults fail closed; default prompt timeout is 300 seconds.
+Fetch `result` from the terminal job, especially if it exceeds event-size limits.
+Queries may return results directly without job history. Identical retry keys
+replay the existing request; conflicting arguments return 409. A cursor older
+than retained events returns 410: fetch job state and resume available history.
+
+Job IDs identify operations. A result's workload `cluster_id` identifies the
+serving deployment, which can outlive a successful run operation. Workload logs
+use `/v1/streams/logs`; monitoring uses `/v1/streams/monitor`. Neither is the job
+feedback stream. Cancellation does not roll back remote effects.
+
+## Tokens, services, and recovery
+
+```bash
+sparkrun daemon token create automation --scope operate --expires-in 3600
+sparkrun daemon token list
+sparkrun daemon token revoke TOKEN_ID
+sparkrun daemon systemd install --now
+sparkrun daemon systemd status
+sparkrun daemon systemd uninstall
+sparkrun daemon resources list
+```
+
+Token scopes are `read`, `operate`, and `admin`; `token create --secret` separately
+permits credential prompts. Non-admin users access their own jobs within scope.
+`token create --manager NAME` grants a stable workload manager (default `daemon`).
+For gateway automation use `--manager sparkroute` and the scope required by its
+catalog operations. Manager identity is separate from permission scope and cannot
+be supplied through request arguments or client labels. Explicit bearer tokens
+retain their manager and scope on Unix sockets too. See
+[workload ownership](/advanced/daemon/#workload-ownership-and-recovery).
+
+Provision the created token into the client's private token file. Manually created
+tokens survive API restart; local discovery tokens rotate with the API process.
+
+Systemd installation is Linux-only and does not enable user lingering. No native
+macOS LaunchAgent/Windows service installer is promised. Drain workers before
+core-environment replacement or plugin changes that would evict leased generations.
+
+After independently reconciling uncertain remote effects, acknowledge a dead
+owner's reservation with `resources reconcile OWNER_ID --acknowledge-effects`.
+Never use that acknowledgment as an automatic retry strategy. See the
+[daemon recovery guide](/advanced/daemon/#streams-restart-and-storage).

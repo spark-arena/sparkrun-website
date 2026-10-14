@@ -9,13 +9,45 @@ sparkrun run <recipe> [options]
 
 Launch an inference workload on one or more DGX Spark systems. sparkrun resolves the recipe, distributes container images and models, configures networking, and starts containers on all target hosts.
 
-Jobs launch in the background (detached containers) and sparkrun follows logs automatically. **Ctrl+C detaches from logs — it never kills the inference job.**
+Jobs launch detached. By default, sparkrun follows startup logs and returns once readiness and required hooks complete. **Ctrl+C cancels observers and leaves the detached workload running.**
+
+## Readiness and exit status
+
+| Mode | Model logs | Completion |
+| --- | --- | --- |
+| Default | Follow startup | Readiness and required hooks complete |
+| `--no-follow` | Suppressed | Still waits for readiness |
+| `--no-ready-wait` | No ongoing attachment | Launch checks complete; readiness is unconfirmed |
+| `--follow` | Continue after readiness | Ctrl+C or log attachment ends |
+
+`--follow` conflicts with either negative flag. `--no-ready-wait` also conflicts
+with `--foreground` and required post-launch hooks. Invalid combinations exit 2
+before launch. A normal ready launch exits 0; launch/readiness/hook failures exit
+1. Ctrl+C while waiting/following exits 130. A readiness timeout does not
+necessarily stop or imply a crash in the detached workload; inspect `status` and
+`logs`. A broken startup log stream does not determine readiness. With explicit
+`--follow`, a terminated log attachment exits 1.
+
+`--ensure` matches launch intent and waits for an existing deployment’s readiness
+at its recorded head/port without rerunning hooks. Partial or unrecoverable
+placement fails readiness; `--ensure --no-ready-wait` checks presence only.
+Foreground mode retains workload-lifetime behavior, including generated systemd
+units. Unsupported host endpoints (currently Kubernetes) need `--no-ready-wait`
+for CLI submission. Library submission has its [own contract](/developer-reference/python-api/).
+
+Supported vLLM/SGLang Docker launches finish with a streaming inference probe;
+other declared runtime/executor combinations retain endpoint checks. A listening
+port alone is not proof of successful generation. Startup TTR port-open, TTR
+HTTP-ready, and TTFT measure from the serving container’s start, not total CLI
+wall time. `--no-timings` hides the final timing/readiness block but not the live
+readiness line. Unsupported observations omit measurements instead of inventing
+zeros. See [recipe readiness](/recipes/format/#readiness).
 
 ## Options
 
 | Option | Description |
 |---|---|
-| `--hosts` / `-H` | Comma-separated host list (first = head) |
+| `--hosts` / `-H` | Comma-separated candidate hosts; first scheduled host becomes head |
 | `--hosts-file` | File with hosts (one per line, `#` comments) |
 | `--cluster` | Use a saved cluster by name |
 | `--port` | Override serve port |
@@ -28,8 +60,15 @@ Jobs launch in the background (detached containers) and sparkrun follows logs au
 | `-o` / `--option` | Override any recipe default: `-o key=value` (repeatable) |
 | `--dry-run` / `-n` | Show what would be done without executing |
 | `--foreground` | Run in foreground (don't detach) |
-| `--ensure` | Only launch if not already running; exit 0 if already up |
-| `--no-follow` | Don't follow container logs after launch |
+| `--ensure` | Reuse matching launch intent; still wait for readiness |
+| `--no-follow` | Suppress model logs; still wait for readiness |
+| `--follow` | Keep watching model logs after readiness |
+| `--no-ready-wait` | Return after synchronous launch checks, without readiness or attachment |
+| `--timings` / `--no-timings` | Show/hide the final stage timing breakdown (on by default) |
+| `--offline` / `--online` | Reuse/copy existing artifacts without internet, or override cluster offline policy |
+| `--runtime-cache` / `--no-runtime-cache` | Toggle persistent compilation/autotuning caches subject to recipe policy and kill switch |
+| `-e` / `--env` | Repeatable environment override `KEY=VALUE`; preserves the literal value |
+| `--no-auto-detect` | Skip HuggingFace metadata lookup for estimates; not a complete offline policy |
 | `--no-sync-tuning` | Skip syncing tuning configs from registries |
 | `--no-rm` | Don't auto-remove containers on exit (keeps containers after stop) |
 | `--memory-limit` | Container memory limit (e.g. `32G`) |
@@ -77,7 +116,7 @@ The `--transfer-mode` flag controls how container images and models are distribu
 
 ## Advanced options
 
-These options are hidden from `--help` but available for advanced use cases:
+Some options are hidden in normal help; use `SPARKRUN_ADVANCED=1 sparkrun run --help` to expose supported advanced controls. A few compatibility flags remain hidden but callable. Visibility does not enable gated capabilities:
 
 | Option | Description |
 |---|---|
@@ -85,10 +124,10 @@ These options are hidden from `--help` but available for advanced use cases:
 | `--dp` / `--data-parallel` | Override data parallelism |
 | `--scheduler` | Placement scheduler: `occupancy-sparse`, `occupancy-dense`, or `greedy`. See [Schedulers & Placement](/advanced/schedulers/). |
 | `--transfer-mode` | Resource transfer mode: `auto`, `local`, `push`, or `delegated` (overrides the cluster setting) |
-| `--collect-diagnostics <path>` | Capture the full run lifecycle into an NDJSON file for post-mortem analysis. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics). |
+| `--collect-diagnostics <path>` | Capture planning, launch, readiness, DEBUG logs, and plugin evidence in a bounded, redacted NDJSON bundle. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics). |
 | `--restart <policy>` | Docker restart policy (`no`, `always`, `unless-stopped`, `on-failure[:N]`) |
 | `--trust` | Trust lifecycle hooks from third-party registries without confirmation. See [Security & Trust](/advanced/security/). |
-| `--rebuild` / `--no-rebuild` | Force the builder to produce a fresh image. No-op for `docker-pull`; forces a rebuild or fresh pull for `eugr`. Overrides the recipe's `builder_config.rebuild`. |
+| `--rebuild` / `--no-rebuild` | Force the builder to produce a fresh image. For `docker-pull`, forces a fresh registry pull; for `eugr`, forces a rebuild or fresh pull according to its build path. Overrides the recipe's `builder_config.rebuild`. |
 | `--container-name` | Override the deterministic cluster ID (i.e. use a static container name) |
 | `--executor-args` | Arguments passed directly to the container executor, e.g. `docker run` (repeatable) |
 | `--ray-port` | Ray GCS port — default 46379 (Ray runtimes only) |

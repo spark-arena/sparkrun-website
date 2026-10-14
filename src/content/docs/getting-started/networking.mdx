@@ -503,3 +503,20 @@ For most setups, `auto` works well. Set an explicit mode on the cluster definiti
 | User account | Same username on every node, member of `docker` group |
 | Required tools | `rsync`, `git`, `docker` (pre-installed on DGX OS) |
 | Switch (3+ nodes) | Required to maximize bandwidth |
+## Shared setup and transfer verification
+
+The wizard and read-only `setup check` use the same hardware/executor plan.
+Already-satisfied SSH mesh/CX7 steps reuse saved topology; changed subnet/MTU
+requests can require confirmation. Sudo authentication is per host, with
+passwordless hosts handled independently. A complete duplicate server-identity
+audit can offer confirmed remediation; see [SSH Setup](/getting-started/ssh-setup/).
+
+RDMA link detection (`ACTIVE`) is not a connectivity or performance test.
+The perftest suite is enabled on every channel; NCCL collective tests additionally
+need `cli.setup.rdma_test.nccl` (alpha default, opt-in on stable/beta).
+
+Transfers use the effective cluster/resource provider policy. Completion counters
+or successful rsync do not prove image/model usability. Each required target is
+validated, including selected files, immutable model revision, permissions, and
+workload-visible paths. Offline mode permits cluster copies but no origin fetches
+or missing-tool installation. See [Model Cache Management](/advanced/cache-management/).

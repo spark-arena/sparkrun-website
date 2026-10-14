@@ -7,7 +7,7 @@ description: Check the status of running inference workloads.
 sparkrun status [options]
 ```
 
-Show sparkrun containers running on cluster hosts. Displays containers grouped by job with their role, host, status, image, and ready-to-use `logs` and `stop` commands.
+Show sparkrun workloads reported by enabled executors on cluster hosts. Displays containers grouped by job with their role, host, status, image, and ready-to-use `logs` and `stop` commands.
 
 :::note
 `sparkrun status` is an alias for the underlying `sparkrun cluster status` command.
@@ -39,8 +39,10 @@ that shares the cluster's substrate and merges the answers, so a workload
 started by the native [`local` executor](/advanced/executors/) appears alongside
 Docker containers — neither is visible to the other's introspection.
 
-A single failing executor is skipped rather than breaking the whole report, and
-unreachable hosts are simply absent from the output.
+A failing or unreachable observation is not proof that a host or executor
+destination is idle. Review diagnostics before using an incomplete report to
+make placement or teardown decisions. Daemon operation IDs are separate from
+the workload cluster IDs shown here.
 :::
 
 ## Examples

@@ -3,23 +3,25 @@ title: proxy
 description: Unified OpenAI-compatible gateway for sparkrun inference endpoints.
 ---
 
-The `sparkrun proxy` commands manage a [LiteLLM](https://docs.litellm.ai/)-powered gateway that discovers running sparkrun inference endpoints and exposes them through a single OpenAI-compatible API.
+The `sparkrun proxy` commands manage a pluggable inference gateway. **LiteLLM is the bundled default on all channels**. Explicitly enabling a gateway capability selects that provider; enabling its plugin alone preserves the selection.
 
 ## Overview
 
 The proxy sits in front of one or more inference workloads launched by sparkrun and provides:
 
 - **Live endpoint discovery** using the same mechanism as `sparkrun cluster status`
-- **Auto-discovery** background process that periodically re-scans and syncs models
+- **Auto-discovery** background process or daemon service that periodically re-scans and syncs models
 - **Health checking** via `GET /v1/models` on each discovered endpoint
 - **Deduplication** of endpoints reachable on multiple network interfaces (e.g. management IP vs ConnectX-7 IP)
 - **Model aliases** so clients can address a model by a friendly name
 - **Load/unload** models through `sparkrun proxy load` / `sparkrun proxy unload`
 
-The proxy runs LiteLLM via `uvx --from 'litellm[proxy]==1.82.6' litellm` — no
+### LiteLLM implementation
+
+When LiteLLM is selected, the proxy runs it via `uvx --from 'litellm[proxy]==1.82.6' litellm` — no
 permanent installation required.
 
-:::note[How changes are applied]
+:::note[How LiteLLM changes are applied]
 The generated config file is the single source of truth for the proxy's model
 list. LiteLLM's runtime mutation endpoints (`/model/new`, `/model/delete`)
 require a database-backed model store — PostgreSQL plus a generated prisma
@@ -32,6 +34,25 @@ already matches what is on disk, so a steady-state auto-discover sweep costs
 nothing and never interrupts serving. The management API is still used
 read-only, to report what the proxy is currently serving.
 :::
+
+## Choose a gateway
+
+```bash
+sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --enable
+sparkrun setup features enable gateway.sparkroute
+sparkrun proxy start --host 127.0.0.1
+# Return to the bundled gateway; use --restart if already running.
+sparkrun proxy start --gateway litellm --restart
+```
+
+`--gateway` persists `proxy.gateway` in `proxy.yaml`. Management binds to the
+recorded running implementation. An absent pinned plugin does not silently switch
+to LiteLLM; process status/stop remain usable, while model/config operations need
+the plugin. See [Managed Plugins](/advanced/plugins/).
+
+`proxy ui`, `proxy admin-token`, aliases, and update mechanisms depend on gateway
+capabilities. Unsupported management fails explicitly. A saved discovery cluster
+from `start --cluster` persists; `--clear-cluster` returns to following the default.
 
 ## Quick start
 
@@ -63,7 +84,7 @@ curl http://localhost:4000/v1/models
 
 ### `sparkrun proxy start`
 
-Discovers running endpoints, generates a LiteLLM config, and launches the proxy. A background auto-discover process periodically re-scans and syncs models with the proxy.
+Discovers endpoints, asks the selected gateway to prepare configuration, and launches it. The selected discovery backend periodically re-scans and syncs models with the proxy.
 
 ```bash
 sparkrun proxy start                          # port 4000
@@ -94,9 +115,12 @@ persisted to `proxy.yaml` either way.
 | `--master-key` | Bearer token for stateless LiteLLM auth (default: none) |
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts (one per line) |
-| `--cluster` | Use a saved cluster by name |
+| `--cluster` | Save a cluster for subsequent discovery |
+| `--clear-cluster` | Forget saved discovery cluster and follow the default |
+| `--gateway` | Persist an explicit gateway selection |
 | `--foreground` | Run in foreground (blocking) |
 | `--no-auto-discover` | Disable periodic endpoint re-scanning |
+| `--discovery-backend process\|daemon` | Select standalone or daemon-managed discovery |
 | `--discover-interval` | Seconds between discovery sweeps (default: 30) |
 | `--restart` | If a proxy is already running, stop it and start fresh with the new settings |
 | `--dry-run` / `-n` | Show what would be done without executing |
@@ -112,7 +136,11 @@ Silence it by choosing explicitly: `--host 127.0.0.1` to restrict exposure, or
 `--master-key <secret>` to require a token. Both are persisted.
 :::
 
-:::note[Authentication needs no database]
+:::note[LiteLLM authentication needs no database]
+An explicit key overrides the `LITELLM_MASTER_KEY` environment fallback. The active
+key is retained in private gateway state so authenticated follow-up commands also
+work from a new shell.
+
 Setting a master key enables LiteLLM's **stateless** bearer-token check via
 `general_settings.master_key`. No database is involved. Features that would
 need one — virtual keys, budgets, request logging, the `/ui` — are out of
@@ -129,7 +157,7 @@ sparkrun proxy stop
 
 ### `sparkrun proxy status`
 
-Shows whether the proxy is running, its PID, bind address, auto-discover status, and lists models registered via the LiteLLM management API.
+Shows whether the proxy is running, its PID, bind address, auto-discover status, and queries models through the selected gateway. Query failures retain `model_query_error`; `models` exits nonzero in text and JSON modes rather than returning a successful empty list.
 
 ```bash
 sparkrun proxy status
@@ -167,7 +195,9 @@ This is intentionally different from `sparkrun run`, which uses exactly the port
 | `RECIPE_NAME` | Recipe to load (required) |
 | `--hosts` / `-H` | Comma-separated host list |
 | `--hosts-file` | File with hosts (one per line) |
-| `--cluster` | Use a saved cluster by name |
+| `--cluster` | Save a cluster for subsequent discovery |
+| `--clear-cluster` | Forget saved discovery cluster and follow the default |
+| `--gateway` | Persist an explicit gateway selection |
 | `--tp` / `--tensor-parallel` | Override tensor parallelism |
 | `--pp` / `--pipeline-parallel` | Override pipeline parallelism |
 | `--gpu-mem` | Override GPU memory utilization (0.0–1.0) |
@@ -212,6 +242,22 @@ generated config — it starts working as soon as the target is loaded.
 When no host context is available, discovery falls back to metadata only and
 skips the liveness step.
 
+### Daemon discovery
+
+Select daemon-managed discovery after enabling the daemon feature:
+
+```bash
+sparkrun setup features enable daemon
+sparkrun proxy start --discovery-backend daemon --cluster mylab
+sparkrun daemon call proxy.discovery.status
+```
+
+The gateway and discovery watcher run as separate durable service jobs, with their
+own capacity budget. They share scope, host coverage, and removal-grace behavior
+with the standalone process backend. See
+[Daemon Mode](/advanced/daemon/#gateway-discovery-and-transport) for service slots,
+SparkRoute transport selection, credentials, and recovery.
+
 ### Auto-discovery
 
 When the proxy starts with auto-discover enabled (the default), a background process runs alongside the proxy:
@@ -247,15 +293,20 @@ supplied values are persisted back.
 
 ### Gateway selection
 
-LiteLLM is currently the only gateway implementation, and it is enabled on
-every channel via the `gateway.litellm` [feature flag](/advanced/feature-flags/).
-The `proxy.gateway` key exists so an alternate implementation can be selected
-later; exactly one gateway is used at a time. Pinning a gateway that is
-disabled or unknown is an error rather than a silent fallback.
+LiteLLM is the bundled default on every channel. The `litellm` plugin, shared
+`gateway` capability, and `gateway.litellm` capability all default on. Explicitly
+running `setup features enable gateway.<provider>` selects that provider, even
+if its flag was already enabled. Other provider flags stay unchanged.
 
-Bringing the proxy *up* is gated by that flag. Managing an already-running
-proxy — `stop`, `status`, `models`, aliases — is not, so a proxy started while
-the flag was on stays stoppable if you later turn it off.
+`plugins enable` permits loading without selecting a gateway; `features reset`
+restores a default without selecting one. Capability commands do not enable a
+disabled parent plugin. Pinning a disabled or unavailable provider in
+`proxy.gateway` raises an error. Restart consumers after changing plugin loading
+or selection.
+
+Disabling `gateway` rejects new gateway actions. Status, stop, service status, and
+service removal remain available for recovery. No disable action automatically
+stops a running service or selects a fallback.
 
 ## State files
 

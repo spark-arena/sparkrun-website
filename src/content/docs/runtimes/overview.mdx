@@ -14,7 +14,7 @@ sparkrun supports multiple inference runtimes through a plugin system. Each runt
 | `sglang` | SGLang | Yes (native) | High-throughput inference, structured generation, experimental GGUF |
 | `llama-cpp` | llama.cpp | Experimental | GGUF quantized models, lightweight deployment |
 | `trtllm` | TensorRT-LLM | Yes (MPI) | NVIDIA TensorRT-LLM with MPI-based multi-node orchestration |
-| `atlas` | [Atlas](https://atlasinference.io/) | Yes (native) | Pure-Rust inference server with native NCCL distribution. Composes tensor and expert parallelism. |
+| `atlas` | [Atlas](https://atlasinference.dev/) | Yes (native) | Pure-Rust inference server with native NCCL distribution. Composes tensor and expert parallelism. |
 | `modular-max` | [Modular MAX](https://www.modular.com/max) | No | Single-node only. `tensor_parallel` maps to local `--devices`. |
 
 :::note
@@ -47,6 +47,8 @@ You can write `runtime: vllm` in a recipe (or let it be auto-detected from a `vl
 
 Both `vllm-distributed` and `vllm-ray` use the same container images and support the same vLLM flags — they differ only in how multi-node clustering is orchestrated.
 
+To add an engine, see [Runtime Implementations](/developer-reference/runtime-implementations/).
+
 ## How runtimes work
 
 **Recipes** declare which runtime to use via the `runtime` field. The runtime handles:
@@ -65,7 +67,7 @@ Both `vllm-distributed` and `vllm-ray` use the same container images and support
 - **SGLang** offers competitive performance, good structured generation support, and experimental GGUF quantized model serving.
 - **llama.cpp** is ideal for GGUF quantized models or when you want a lightweight alternative.
 - **TensorRT-LLM** provides NVIDIA's optimized inference engine with MPI-based multi-node orchestration.
-- **Atlas** is a pure-Rust inference server (see [Atlas on GitHub](https://github.com/Avarok-Cybersecurity/atlas)) with native NCCL distribution. It composes tensor parallelism (`tensor_parallel`) and expert parallelism (`ep_size`) on either an overlapping mesh (`tp == ep`) or an orthogonal one (`tp * ep`), and derives the world size from the two.
+- **Atlas** is a pure-Rust inference server (see [Atlas on GitHub](https://github.com/Atlas-Inf/atlas)) with native NCCL distribution. It composes tensor parallelism (`tensor_parallel`) and expert parallelism (`ep_size`) on either an overlapping mesh (`tp == ep`) or an orthogonal one (`tp * ep`), and derives the world size from the two.
 - **Modular MAX** is single-node only: `tensor_parallel` maps to local `--devices` rather than to host count, and the runtime refuses a multi-host placement rather than silently truncating it.
 
 ## Maintained container images
@@ -82,3 +84,14 @@ The Spark Arena team maintains several specialized container images for DGX Spar
 :::tip[Sentinel images]
 The two `dgx-vllm-eugr-nightly*` names above are **sentinel images**: at the `:latest` tag, sparkrun's `eugr` builder resolves them to the authoritative published nightly and pulls it, so you get a stable name that tracks upstream [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) without managing tags yourself. Any other tag is pulled as-is. Since July 2026 this is a **pull**, not a local rebuild — building from upstream wheels is opt-in via `build_args: ["--use-wheels"]`. See [vLLM › Sentinel images](/runtimes/vllm/#sentinel-images).
 :::
+
+## Startup and cache policy
+
+Default `run` completes after declared readiness and required hooks; timing and
+inference probes depend on the runtime/executor's capabilities. Unsupported
+observers do not report fabricated startup metrics. Explicit recipe memory
+settings override serving defaults and remain distinct from scheduling reservations.
+Model manifests and target runtime compilation caches have separate validation
+and cleanup policies. See [run](/cli/run/), [Schedulers](/advanced/schedulers/),
+and [Model Cache Management](/advanced/cache-management/). Example image tags and
+recipe values on this page are illustrative, not installation-wide defaults.

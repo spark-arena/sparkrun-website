@@ -16,12 +16,25 @@ sparkrun includes the following registries out of the box:
 | `@sparkrun-transitional` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | Yes | Recipes originally part of sparkrun's built-in defaults, now maintained separately. |
 | `@experimental` | [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) | No | Experimental Spark Arena recipes. Less tested or using newer features. |
 | `@community` | [spark-arena/community-recipe-registry](https://github.com/spark-arena/community-recipe-registry) | No | Community-contributed recipes. |
-| `@atlas` | [Avarok-Cybersecurity/atlas-recipes](https://github.com/Avarok-Cybersecurity/atlas-recipes) | No | Official Atlas recipe registry (bundled as a default in sparkrun v0.2.31+). See the [Atlas runtime docs](/runtimes/atlas/) for details. |
+| `@atlas` | [Atlas-Inf/sparkrun-recipes](https://github.com/Atlas-Inf/sparkrun-recipes) | No | Official Atlas recipe registry (bundled as a default in sparkrun v0.2.31+). See the [Atlas runtime docs](/runtimes/atlas/) for details. |
 | `@sparkrun-testing` | [dbotwinick/sparkrun-recipe-registry](https://github.com/dbotwinick/sparkrun-recipe-registry) | No | Internal testing registry with recipes, tuning configs, and benchmark profiles. |
 
 **Visible** registries appear in `sparkrun list` and `sparkrun search`. Hidden registries are still usable by name (e.g., `sparkrun run @experimental/my-recipe`) or with `sparkrun list --all`.
 
 Use `sparkrun registry list` to see all configured registries and their status.
+
+## Plugin-owned registries
+
+An enabled plugin can contribute registries automatically, including recipes,
+tuning configurations, benchmark profiles, and mods. These appear in
+`sparkrun registry list` with a `plugin:<owner>` source. Your saved configuration
+takes precedence; changes such as disabling or trusting a contributed registry
+persist, and removing one prevents the plugin from adding it back automatically.
+
+Plugin authors can use `register_default_registry` without cloning repositories
+or editing user configuration during startup. See
+[Plugin Development: plugin-owned registries](/developer-reference/plugin-development/#plugin-owned-registries)
+for the registration example, visibility, overrides, and trust rules.
 
 ## Spark Arena
 
@@ -309,3 +322,10 @@ The same rules apply to benchmark profiles, tuning configs, and mods, so
 listing and lookup can never disagree.
 
 Filenames are matched with or without `.yaml`/`.yml` extensions.
+
+## Plugin-contributed registries
+
+Installing a [managed plugin](/advanced/plugins/) trusts its Python source; it
+does not grant trust to recipes in registries it declares. Registry trust remains
+a separate authorization decision. Catalog imports retain their external-source
+provenance even when staged at a local path. See [Security](/advanced/security/).

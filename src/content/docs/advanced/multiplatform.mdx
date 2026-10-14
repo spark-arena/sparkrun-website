@@ -67,10 +67,10 @@ GB10 hosts.
 
 - **Single-vendor across hosts**: auto-packed (e.g. mixed RTX + H200, both
   NVIDIA).
-- **Multi-vendor across hosts**: `core/placement.py` raises
+- **Multi-vendor across hosts**: `core/scheduler.py` and `schedulers/` raises
   `LayoutRequiredError`. Recipes must declare a `RecipeLayout` mapping ranks
   to `(host, local_gpu)` explicitly.
-- **Multi-vendor on one host** (Apple M5 + discrete NVIDIA): also requires
+- **Multi-vendor on one host** (a hypothetical mixed-vendor target): also requires
   explicit layout — the auto-packer refuses to guess which accelerator
   receives each rank.
 
@@ -81,3 +81,12 @@ to add a new platform (AMD / Intel) or wire up a real RCCL / HCCL backend, see
 the contributor-facing
 [`docs/MULTIPLATFORM.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/MULTIPLATFORM.md)
 in the repository.
+
+## Controller portability and workload support
+
+The optional [daemon](/advanced/daemon/) has portable TCP controller support with
+macOS/Windows release checks. This does not qualify native Apple GPU workloads,
+remove Linux requirements from target setup, or validate every hardware/backend
+combination. Platform matching, executor support, runtime capability checks, model
+fit, and observed readiness each need their own evidence. Prepared resources and
+executor destinations are described in [Execution Flow](/developer-reference/execution-flow/).

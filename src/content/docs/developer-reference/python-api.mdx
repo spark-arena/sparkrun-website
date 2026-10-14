@@ -1,112 +1,224 @@
 ---
 title: Python API
-description: Driving sparkrun from Python via the console-free sparkrun.api package.
+description: Initialize applications, plan workloads, and use the console-free 0.4.0 API.
 ---
 
-`sparkrun.api` is the supported way to drive sparkrun from Python. It is
-**console-free**: it never writes to stdout or stderr and never calls
-`sys.exit()`. Failures raise typed exceptions; streaming surfaces return
-iterators of structured records that a caller renders however it likes.
-
-The CLI is itself a renderer over this package, so anything the CLI can do is
-reachable from Python.
-
-:::note
-For shelling out to the CLI instead — exit codes, `--json` output, scripting
-patterns — see [CLI Automation](/developer-reference/cli-automation/).
-:::
+`sparkrun.api` provides console-free operations, typed results/errors, and
+structured streams and opt-in diagnostic bundles. Frontends own confirmation,
+rendering, capture policy, and readiness policy. **0.4.0 breaks earlier Python contracts**; see the
+[migration map](#compact-migration-map) for changed options and imports.
 
 ## A first call
 
 ```python
-import sparkrun.api as api
+from sparkrun.application import initialize
+from sparkrun import api
 
-result = api.run(api.RunOptions(
+sctx = initialize()
+options = api.RunOptions(
     recipe="qwen3-1.7b-vllm",
     cluster="mylab",
-    overrides={"tensor_parallel": 2},
-    follow=False,
-))
-
+    overrides={"tensor_parallel": 2, "port": 9001},
+)
+plan = api.plan(options, sctx=sctx)
+print(plan.host_list, plan.notes)  # Render the preview in your frontend.
+# Obtain any required authorization before execution.
+result = api.run(options, sctx=sctx, plan=plan)
 print(result.cluster_id, result.serve_port, result.rc)
 ```
 
-`RunOptions` mirrors the `sparkrun run` flag set; `recipe` plus one of `hosts`
-or `cluster` is required and everything else defaults to the CLI's behavior.
+Planning can perform transport preparation, hardware discovery, and occupancy
+queries. It does not launch a workload. Reusing the live `RunPlan` avoids repeating
+placement and preserves the inputs shown to the user, but does not freeze remote
+cluster state. A serialized preview is not a substitute for the retained plan.
 
-## Surfaces
+Hosts may be explicit, resolved through a cluster, or supplied by application
+defaults. Runtime settings such as port belong in `overrides`. Detached API calls
+return without the CLI's log attachment/readiness policy; `follow=False` is the
+library default and `follow` only controls legacy foreground attachment. Use
+`api.logs()` or an explicit plugin iterator to observe a detached deployment.
+The [daemon](/advanced/daemon/) provides an operation workflow with readiness and
+prompts for remote applications. See [Daemon API](/developer-reference/daemon-api/)
+for authenticated HTTP/SSE clients; its operation names are independent of the
+Python library functions. `--foreground` CLI behavior is a separate contract.
 
-| Function | Purpose |
-|---|---|
-| `run(RunOptions)` | Launch a workload → `RunResult` |
-| `stop(...)` / `stop_all(...)` | Stop one workload or every workload on a cluster |
-| `logs(...)` | Iterate `LogLine` records from a running workload |
-| `status(hosts, …)` | Lean occupancy snapshot → `ClusterStatus` |
-| `status_report(hosts, …)` | Display-oriented status with job metadata enrichment |
-| `schedule(...)` | Compute placement without launching |
-| `list_jobs(...)` | Enumerate persisted job metadata → `JobInfo` |
-| `search_recipes(query, …)` | The recipe catalog → `RecipeSummary` rows |
-| `benchmark(BenchmarkOptions)` / `resume_benchmark(...)` | Run or resume a benchmark |
-| `live_monitor(...)` / `open_live_monitor(...)` | Telemetry + occupancy frames for live monitoring |
-
-Sub-namespaces group the larger surfaces: `api.proxy` (gateway lifecycle,
-models, aliases), `api.setup` (SSH access bootstrap), and `api.tailscale`.
-
-## Errors
-
-Everything derives from `api.SparkrunError`, so a caller can catch that
-generically or discriminate on a subclass:
+## Initialization and context reuse
 
 ```python
-try:
-    result = api.run(options)
-except api.InsufficientCapacity as exc:
-    print("need %s slots; cluster has %s" % (exc.required, exc.host_list))
-except api.RecipeNotFound:
-    ...
-except api.SparkrunError as exc:
-    ...
-```
+from sparkrun.application import initialize
+from sparkrun import api
 
-Typed errors include `InsufficientCapacity`, `LayoutRequired`, `RecipeNotFound`,
-`InvalidRegistryFilter`, `HostsUnreachable`, `JobNotFound`, `AmbiguousWorkload`,
-`TrustRejected`, and the benchmark family (`BenchmarkFailed`,
-`NoResumableState`, `CategoryNotFound`, `AmbiguousCategoryError`,
-`FrameworkCategoryMismatch`).
-
-Several carry structured detail rather than just a message —
-`InsufficientCapacity` exposes the status snapshot, host list, and requested
-slot count so a caller can render capacity diagnostics without a second SSH
-round-trip.
-
-## Sharing a session
-
-Every entry point accepts an optional `sctx`. Building one and passing it to a
-chain of calls shares the config, registry manager, and cluster manager instead
-of rebuilding them per call:
-
-```python
-sctx = api.default_sctx()
-
+sctx = initialize(config_path="/path/to/config.yaml")
 recipes = api.search_recipes("qwen", sctx=sctx)
-result = api.run(api.RunOptions(recipe=recipes[0].name, cluster="mylab"), sctx=sctx)
-snapshot = api.status(["10.0.0.1", "10.0.0.2"], cluster="mylab", sctx=sctx)
+clusters = api.list_clusters(sctx=sctx)
 ```
+
+Choose one application/profile and canonical config file **before** initializing
+plugins. Repeated initialization keeps that binding; switching it within the
+process raises an error. `api.default_sctx()` initializes the same binding but
+creates a fresh context view. Passing `sctx` shares cached managers. A fatal
+bootstrap failure requires repairing the cause and restarting the process.
+Cluster-specific SSH settings remain local to the operation.
+
+Custom frontends can supply an `ApplicationProfile` to `initialize`. Its stable
+application identity, command/package, update sources, selected integrations,
+and config/cache namespaces determine policy. The controller identity derives
+from a private seed and canonical config directory; it is not a user-selectable
+controller name. Moving/copying the directory changes that identity. Child
+processes inherit the selected profile/config. See the pinned
+[application profile guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/APPLICATION_PROFILES.md).
+
+## Task-oriented API map
+
+| Task | Public surface |
+| --- | --- |
+| Plan, launch, stop | `plan`, `run`, `stop`, `stop_all`, `RunOptions`, `RunPlan`, `RunResult` |
+| Prepare assets without inference | `BuildOptions`, `plan_build`, `build`; `materialize` resolves container launch specs read-only |
+| Browse/preview recipes | `catalog_recipes`, `get_recipe_details`, `search_recipes`, `Catalog*` payloads |
+| Resolve/import/retain | `resolve_catalog_recipe`, `import_recipe`, `retain_catalog_recipe`, `cleanup_catalog_imports` |
+| Registry/cluster catalog | `list_registries`, `configure_registry`, `refresh_registries`, `list_clusters`, `catalog_cluster_capacity` |
+| Placement/occupancy | `schedule`, `status`, `status_report`, `find_running_intent` |
+| Workload metadata and logs | `list_jobs`, `open_log_target`, `logs`; [Logging API](/developer-reference/logging-api/) |
+| Diagnostic bundles | `collect_diagnostics`, `capture_diagnostics`, `DiagnosticsResult`; [Diagnostics API](/developer-reference/diagnostics-api/) |
+| Plugin and capability policy | `api.plugins.enable/disable`, `api.features.enable/disable/reset` |
+| Monitoring | `live_monitor`, `open_live_monitor`, `open_telemetry` |
+| Setup | `api.setup`: probes/plans, apply/undo, manifests, SSH audits and rotation |
+| Model cache | `sparkrun.api.model_cache`: `resolve_manifest`, `inspect_model`, `import_manifest`, `repair_model` |
+| Model-cache retention | `sparkrun.api.model_cache`: `inventory_cache`, `prune_cache`, `pin_revision`, `reconcile_claim` |
+| Gateways | `api.proxy`: lifecycle, model queries, aliases and capability-dependent management |
+| Benchmarking | `benchmark`, `resume_benchmark`, `BenchmarkOptions`, `BenchmarkResult` |
+
+### Catalog browse, preview, and retain
+
+Browse and preview return display payloads. Resolve to a live recipe before launch;
+import stages an external recipe, while retain preserves an import for later use.
+Keep source provenance: a path to a staged import does not automatically make it
+a trusted local recipe. Refreshing registries or importing is separate from a
+read-only catalog query. See the pinned
+[catalog guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/CATALOG_API.md)
+for query/pagination and retain/cleanup examples.
+
+### Setup plans and execution
+
+Use `api.setup` to probe hosts and select the hardware/executor plan, then render
+findings before applying steps. Probe/readiness and execution share the step model;
+probing never authorizes mutation. Apply/undo return per-step outcomes and preserve
+recovery manifests. Obtain confirmation and per-host sudo credentials in the
+frontend. See [SSH Setup](/getting-started/ssh-setup/) and the pinned
+[headless setup examples](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
+
+### Model-cache usage and retention
+
+Cache management operates on each host's HF home. Inventory is read-only, and
+`prune_cache` defaults to a preview with a seven-day minimum age:
+
+```python
+from sparkrun.api import model_cache
+
+inventory = model_cache.inventory_cache(cache_dir="/models/hf")
+preview = model_cache.prune_cache(
+    cache_dir="/models/hf",
+    dry_run=True,
+    min_age_days=7,
+    max_bytes=536870912000,
+)
+for report in preview:
+    print(report["host"], report["planned_bytes"], report["target_met"])
+```
+
+Reports are typed `CacheReport`/`CacheEntry` objects that also support mapping
+access. Use stable `reason_code` values for automation, and inspect budget and
+estimate-kind fields before interpreting byte counts.
+
+The default host is `localhost`; pass `hosts`, `ssh_kwargs`, or an existing
+`session` for remote caches. Applying cleanup requires `dry_run=False`.
+`max_bytes` budgets private tracked-snapshot allocations; `min_free_bytes` targets
+filesystem free space. Check `target_met` in every host report even if the call
+returns normally. Shared HF blobs, pins, active claims, and unknown content remain
+protected.
+
+`pin_revision(request, ..., pinned=True)` takes a `ModelArtifactRequest` with a
+full immutable commit; `pinned=False` removes its retention pin.
+`reconcile_claim(request, ..., claim=..., confirm_inactive=True)` releases an exact
+claim after the caller has verified all of its workloads and launches stopped.
+It does not delete model files or discover inactivity. See
+[Model Cache Management](/advanced/cache-management/#usage-tracking-and-retention) for
+tracking, protection, and host requirements.
+
+## Logs and diagnostic capture
+
+Use `api.open_log_target(workload_id, ...)` to resolve reusable sources, then read,
+follow, or page their output. `api.logs(workload_id, ...)` is the convenience
+iterator. The logging selector is `workload_id`, whose value is returned by
+`RunResult.cluster_id`; other lifecycle APIs retain their existing names. Keep
+`hosts` as the full topology and select one source with `host`, `container`, or
+`source_id`. See [Logging API](/developer-reference/logging-api/) for cancellation,
+finite export, native Kubernetes, and resource changes.
+
+Diagnostic capture wraps operations without adding fields to `RunOptions`:
+
+```python
+from sparkrun import api
+from sparkrun.application import initialize
+
+sctx = initialize()
+with api.capture_diagnostics("run.ndjson", sctx=sctx) as capture:
+    result = api.run(api.RunOptions(recipe="my-recipe.yaml", cluster="lab"), sctx=sctx)
+    readiness = api.wait_ready(result, sctx=sctx)
+    if not readiness.ready:
+        raise RuntimeError("Workload did not become ready")
+print(capture.result.partial, capture.result.output_path)
+```
+
+Choose a new output path for each capture. The bundle includes operation-attributed
+DEBUG logs, feedback, and admitted plugin snapshots, with shared redaction and
+limits. Nested captures share the outer sink. A returned failure value must be
+raised or reported with `capture.emit_error(phase, error)` to mark the outcome.
+`api.collect_diagnostics()` performs standalone configuration/host/workload
+collection. See [Diagnostics API](/developer-reference/diagnostics-api/) for the
+complete contract and benchmark capture.
 
 ## Trust
 
-`RunOptions.trust` controls what happens when a recipe from a third-party
-registry declares lifecycle hooks:
+`RunOptions.trust` is boolean and defaults to `False`. False retains automatic
+trust for local recipes and trusted registries; otherwise gated execution raises
+`TrustRejected`. `True` supplies explicit authorization. The library never
+prompts, even with a TTY. A frontend must obtain the user's authorization before
+calling the API. `trust=None` is not a prompting mode.
 
-- `None` — prompt interactively (the CLI default).
-- `True` — pre-acknowledge; hooks run.
-- `False` — refuse; `api.run` raises `TrustRejected`.
+Registry-loaded recipes must retain matching source provenance for automatic
+trust. Reload stale recipes or obtain explicit authorization. Plugin source trust
+and recipe-registry trust are separate decisions. See [Security](/advanced/security/).
 
-Non-interactive callers should set it explicitly rather than inheriting the
-prompting default. See [Security](/advanced/security/).
+## Errors and result handling
 
-## Stability
+Operational failures use `api.SparkrunError` subclasses such as
+`InsufficientCapacity`, `RecipeNotFound`, `HostsUnreachable`, `TrustRejected`,
+`JobNotFound`, `AmbiguousWorkload`, and `IntegrationUnavailable`.
+`InsufficientCapacity` retains the requested slots and observed host/status detail.
+Pure model/plan validation may raise `ValueError` or `TypeError`; interrupts propagate.
+Check public `RunResult.rc`; plugin launches need not supply a private launch handle.
 
-Dataclass shapes and the exception hierarchy are stable. Adding fields is
-non-breaking; removing them is breaking. Anything under a leading underscore
-(`sparkrun.api._run`, …) is internal — import from `sparkrun.api` directly.
+Benchmark results, callback decisions, and retryable finalization failures have
+separate contracts: see [Benchmark API](/developer-reference/benchmark-api/).
+For operation events and subscribers see [Feedback](/developer-reference/feedback/).
+
+## Compact migration map
+
+| Earlier input/import | 0.4.0 replacement |
+| --- | --- |
+| `RunOptions(port=9001)` | `RunOptions(recipe="my-recipe", overrides={"port": 9001})` |
+| `RunOptions.diagnostics_path` | Wrap operations with `api.capture_diagnostics`; CLI `--collect-diagnostics` remains |
+| `BenchmarkOptions.arena` | `integrations={"arena": {}}` to select it, `{}` for none |
+| Private benchmark prompt/completion hooks | `progress_callback` and `decision_callback` |
+| `sparkrun.arena` | `sparkrun.plugins.sparkarena` |
+| `sparkrun.api.k8s` | `sparkrun.plugins.k8s.api` |
+| `sparkrun.orchestration.executors.k8s` | `sparkrun.plugins.k8s.executor` |
+| Builder image-only preparation hook | `prepare(..., builder_context=None)` |
+| Per-family installed entry-point groups | Module targets in `sparkrun.plugins` with explicit selection |
+
+Use public imports instead of leading-underscore modules. Pin compatible core and
+integration releases together. This Python boundary does not retire saved recipe,
+configuration, or benchmark formats by implication. The full pinned
+[migration guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/DISTRIBUTION_API_MIGRATION.md)
+records detailed contract changes.

@@ -30,10 +30,10 @@ sparkrun cluster create mylab \
 
 ## Host ordering
 
-The first host in a cluster definition is used as the **head node** for multi-node jobs. Order the remaining hosts however you like — they become workers.
+The first host of the **scheduled placement** becomes head; occupancy scheduling can choose a different host from the first saved candidate. Host order still matters for greedy placement. Inspect the plan/status for the actual head.
 
 ```bash
-# 192.168.11.13 is the head node
+# Save candidates; scheduling determines the actual head
 sparkrun cluster create mylab --hosts 192.168.11.13,192.168.11.14
 ```
 
@@ -94,3 +94,13 @@ When a default cluster is set, commands like `sparkrun run` use it automatically
 ## Next steps
 
 After creating a cluster, set up [SSH access](/getting-started/ssh-setup/) for multi-node inference.
+
+## Placement, state, and cache policy
+
+Hardware inventory, per-host executor destinations, and live reservations determine
+placement. Ordinary workloads reserve accelerators exclusively; a low engine memory
+fraction does not automatically permit co-location. See [Schedulers](/advanced/schedulers/).
+Workload metadata is shared across direct and daemon calls, while daemon operation
+history is separate. Missing observations are not proof of idle capacity.
+Cluster model validation/selection/provider settings and runtime cache cleanup are
+covered in [Model Cache Management](/advanced/cache-management/).

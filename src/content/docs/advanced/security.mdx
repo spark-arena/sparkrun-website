@@ -132,3 +132,30 @@ For the full security narrative (`utils/shell.py` quoting, sudoers
 validation, OAuth callback CORS tightening, trtllm host-key strictness, the
 delegated-copy path), see
 [`docs/SECURITY.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/SECURITY.md).
+
+## Plugin source trust
+
+[Managed plugins](/advanced/plugins/) execute Python with the controller's
+permissions. `plugins add` obtains explicit source trust before code execution;
+`--trust` is noninteractive consent, while generic `--yes` is not. Consent covers
+future compatible updates from that source; changed declarations can need renewed
+consent. Installing a plugin does not authorize recipe registries it contributes.
+Metadata-only `plugins list` and `--check` (executes bounded load checks) differ.
+
+## SSH server identities
+
+[SSH identity audits](/getting-started/ssh-setup/#ssh-host-identity-audit-and-rotation)
+compare public server keys and hashed machine IDs without modifying hosts.
+Incomplete probes do not prove uniqueness. `setup check` is always read-only;
+wizard `--yes` does not rotate identities. The separate confirmed rotation command
+preserves login keys, hands off trust over authenticated SSH, and refreshes peers.
+Use recovery records for partial failures; never disable host verification.
+Machine-ID rotation needs a planned reboot that Sparkrun does not perform.
+
+## Remote operation authorization
+
+The [optional daemon](/advanced/daemon/) requires authentication, scope checks,
+and explicit prompt authorization. Remote TCP requires TLS unless the operator
+explicitly chooses plaintext with `--allow-insecure`; that choice still requires
+bearer authentication. Use token files and verified CA trust in clients. Local
+Unix peer authentication is not a remote transport or a plugin trust grant.

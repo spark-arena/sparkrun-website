@@ -1,14 +1,17 @@
 ---
 title: Diagnostics
-description: Collect hardware, firmware, network, and Docker diagnostics from DGX Spark hosts.
+description: Collect opt-in host and workload diagnostic bundles from the CLI, Python API, and daemon.
 ---
 
-sparkrun provides two diagnostic tools for inspecting DGX Spark hosts and capturing runtime information:
+Diagnostics collect configuration, host information, operation feedback, and
+bounded workload log tails into a versioned NDJSON file. Collection is opt-in,
+does not change host configuration, and never uploads the file automatically.
 
-- **Host diagnostics** (`sparkrun setup diagnose`) -- inspect hardware, firmware, network, and Docker status across your hosts
-- **Run diagnostics** (`sparkrun run --collect-diagnostics`) -- capture the entire lifecycle of an inference run for post-mortem analysis
-
-Both tools produce structured [NDJSON](https://ndjson.org/) (newline-delimited JSON) output for easy processing.
+- Use `sparkrun setup diagnose` to inspect hosts without launching a workload.
+- Use `sparkrun run --collect-diagnostics FILE` to capture planning, launch,
+  readiness, and failure evidence around a run.
+- Applications and daemon clients can collect a saved workload or capture a run
+  or benchmark through the same [Diagnostics API](/developer-reference/diagnostics-api/).
 
 ## Host diagnostics
 
@@ -51,101 +54,95 @@ With `--sudo`, additional DMI data is collected via `dmidecode`:
 |---|---|
 | **DMI** | BIOS vendor/version/date, system manufacturer/product/version/serial/UUID, board manufacturer/product/version/serial, memory slots/populated/max |
 
-### Structured output
-
-Each record in the NDJSON file has an envelope with metadata fields:
-
-```json
-{"_type": "host_hardware", "_seq": 1, "_ts": "2026-03-22T20:39:29.123456+00:00", "host": "192.168.11.13", "cpu_model": "ARMv8 ...", "gpu_name": "GH200 480 GB", ...}
-```
-
-Record types emitted for each host:
-
-| Record type | Contents |
-|---|---|
-| `diag_header` | sparkrun version, host list, command used |
-| `host_hardware` | CPU, RAM, disk, GPU details |
-| `host_firmware` | OS, kernel, BIOS, JetPack, CUDA |
-| `host_network` | Network interfaces, default route, management IP |
-| `host_docker` | Docker version, storage, NVIDIA runtime, container counts |
-| `host_firmware_updates` | Firmware device inventory and update history |
-| `host_dmi` | DMI/dmidecode data (sudo only) |
-| `host_error` | Error details for hosts that failed collection |
-| `config_sparkrun` | Local sparkrun config: paths, SSH user, default hosts |
-| `config_clusters` | Cluster definitions: names, hosts, users, transfer settings |
-| `config_registries` | Registry configuration: names, URLs, subpaths, enabled state |
-| `diag_summary` | Total hosts, successful/failed counts, duration |
-
 ## Run diagnostics
 
-:::note
-Run diagnostics is currently a hidden option intended for advanced debugging and support workflows.
-:::
-
-When launching an inference workload, you can capture the full lifecycle into an NDJSON file:
+The hidden `--collect-diagnostics` option captures the CLI lifecycle:
 
 ```bash
-sparkrun run my-recipe --collect-diagnostics run_diag.ndjson
+sparkrun run my-recipe --cluster mylab --collect-diagnostics run_diag.ndjson
 ```
 
-### What it captures
+Capture includes planned placement, configuration summaries, recipe and launch
+results, phase timings, operation logs, structured feedback, and exceptions.
+Failed operations attempt to retain workload log tails. Plugins can contribute
+bounded diagnostic sections; OCI Relay records source/route decisions, failure
+evidence before receiver cleanup, and transfer/cleanup outcomes.
 
-The `RunDiagnosticsCollector` wraps the entire `sparkrun run` lifecycle and records:
+Only logs attributed to the captured operation are included. Capture admits DEBUG
+and higher logs independently of CLI verbosity; `-vvv` is not required and console
+output retains its normal threshold. Explicit named-logger thresholds and
+`logging.disable()` still apply. Host probes are deduplicated across nested planning
+and launch calls. Workload log tails default to 200 lines per source.
 
-| Record type | Contents |
-|---|---|
-| `diag_header` | sparkrun version, host list |
-| `run_recipe` | Recipe name, model, runtime, container, defaults, CLI overrides |
-| `run_config` | Launch configuration details |
-| `run_serve_command` | Generated serve command and container image |
-| `run_phase` | Phase start/end timestamps with duration (e.g., distribution, launch, health check) |
-| `run_launch_result` | Return code, cluster ID, runtime info, NCCL env |
-| `run_health_check` | Health check attempts with URL, status code, success |
-| `run_container_logs` | Tail of container logs from each host |
-| `log` | All log records (DEBUG+) captured during the run — level, logger name, message, timestamp |
-| `run_error` | Error details with phase context and traceback |
-| `run_summary` | Total duration, per-phase timings, overall success |
+For Python or daemon benchmarks, capture saves log tails before cleanup of an
+owned inference workload, including after successful measurements. That preserves
+logs if later export or publication fails. There is no separate benchmark CLI
+capture flag; use [Python capture](/developer-reference/diagnostics-api/#capture-around-operations)
+or [daemon capture](/developer-reference/diagnostics-api/#daemon-collection-and-downloads).
 
-Host diagnostics (`host_hardware`, `host_firmware`, etc.) are also collected at the start of the run.
+## Read a bundle
 
-:::note
-The `log` records capture **all** log output at DEBUG level regardless of your console verbosity setting. This means the diagnostics file contains full SSH command output, script content, and internal state even when running with default (quiet) verbosity.
-:::
+Records include `_type`, `_seq`, and `_ts`. Consumers should ignore unfamiliar
+record types and plugin sections. Useful records include:
 
-### Lifecycle phases
+| Record | Meaning |
+| --- | --- |
+| `diag_header` | Bundle metadata and `schema_version: 1` |
+| `host_hardware`, `host_firmware`, `host_network`, `host_docker` | Host observations |
+| `host_firmware_updates`, `host_dmi`, `host_error` | Optional firmware/DMI data or probe errors |
+| `config_sparkrun`, `config_clusters`, `config_registries` | Configuration summaries |
+| `log` | Python logs attributed to this operation |
+| `plugin_diagnostic` | Plugin-owned section and versioned payload under `data` |
+| `plugin_diagnostics_metadata`, `plugin_diagnostics_summary` | Plugin provenance and bounded omission/error counts |
+| `bundle_section` | Section status: `ok`, `error`, `skipped`, or `cancelled` |
+| `bundle_complete` | Final `partial`, `truncated`, and `operation_success` values |
 
-The collector tracks timing for each phase of the run, making it easy to identify where time is spent or where failures occur:
-
-1. Host diagnostics collection
-2. Recipe resolution and validation
-3. Resource distribution (model and container sync)
-4. Container launch and cluster formation
-5. Health check polling
-6. Summary and cleanup
-
-## Use cases
-
-- **Debugging multi-node issues** -- inspect network interfaces, IB status, and Docker configuration across all nodes
-- **Support tickets** -- attach the NDJSON file for complete system state
-- **Hardware verification** -- confirm GPU memory, driver versions, and firmware across a fleet
-- **Pre-deployment checks** -- verify Docker runtime, CUDA version, and network connectivity before launching workloads
-- **Post-mortem analysis** -- review phase timings and container logs after a failed run
-
-## Processing NDJSON output
-
-NDJSON files can be processed with standard tools:
+A missing `bundle_complete` means capture did not finish. A partial bundle can
+still contain useful evidence. Skipped probes, read failures, or truncation do
+not by themselves mean the workload failed. Native Kubernetes uses resource-aware
+workload log readers; SSH/Linux host probes are explicitly skipped. Kubernetes
+events, manifests, and node-level collectors are outside this version.
 
 ```bash
-# Pretty-print all records
-cat spark_diag_*.ndjson | python -m json.tool --no-ensure-ascii
+# Pretty-print records from one bundle
+jq . run_diag.ndjson
 
-# Extract only hardware records
-cat spark_diag_*.ndjson | jq 'select(._type == "host_hardware")'
+# Inspect completion and section failures
+jq 'select(._type == "bundle_complete" or ._type == "bundle_section")' run_diag.ndjson
 
-# Get GPU info for all hosts
-cat spark_diag_*.ndjson | jq 'select(._type == "host_hardware") | {host, gpu_name, gpu_memory_mb, gpu_driver}'
+# Inspect plugin evidence
+jq 'select(._type == "plugin_diagnostic")' run_diag.ndjson
 ```
 
-:::tip
-See the [troubleshooting guide](/getting-started/troubleshooting/) for common issues and their solutions.
-:::
+## File limits and sharing
+
+The default bundle budget is 16 MiB; oversized records and excess output are
+bounded, with space reserved for completion. Python and daemon callers can set
+`max_bytes` and `log_tail`. Files are created privately and exclusively: an
+existing output path is never overwritten or appended to. Cancellation stops
+new probes and still attempts to finalize the bundle. `setup diagnose --dry-run`
+previews collection without remote probes or log reads.
+
+All records pass through the shared redactor, including plugin payloads, logs,
+and errors. It removes known credentials and secret patterns, but arbitrary text
+can still contain unrecognized secrets. Hostnames, hardware identity, paths, and
+configuration summaries remain useful troubleshooting data. Review the file
+before attaching it to a support request.
+
+## Interpreting preparation and startup failures
+
+Start with read-only `setup check --cluster mylab --json` for applicable host
+prerequisites and duplicate-identity advisories. Then use
+[model-cache inspection](/cli/model-cache/) to distinguish missing inventory,
+damaged files, broken shared-blob links and access failures before targeted repair.
+A full transfer counter does not attest to final target usability.
+
+Default `run` readiness failures can leave detached workloads available for
+inspection. Docker-start port-open/HTTP-ready/TTFT observations overlap; do not
+sum them or confuse them with total CLI duration. See [run](/cli/run/) and
+[Troubleshooting](/getting-started/troubleshooting/).
+
+Diagnostic capture, live workload logs, operation feedback, monitoring, and
+anonymous usage telemetry serve different purposes. See [Diagnostics API](/developer-reference/diagnostics-api/)
+for library integration, limits, and daemon downloads, and
+[Logging API](/developer-reference/logging-api/) for reusable live log readers.

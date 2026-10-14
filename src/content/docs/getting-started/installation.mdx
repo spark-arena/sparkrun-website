@@ -41,7 +41,10 @@ sparkrun --version
 sparkrun update
 ```
 
-This updates sparkrun to the latest version and refreshes all recipe registries. Use `--no-update-registries` to skip the registry update.
+This updates core, reconciles compatible managed plugins, and refreshes recipe registries. Use `sparkrun update --no-update-plugins` for a local plugin compatibility audit without fetching plugin updates. To skip registries, use `sparkrun setup update --no-update-registries`; that flag is not accepted by the top-level `update` command.
+
+See [Managed Plugins](/advanced/plugins/) for separately installed integrations and
+[What’s New in 0.4.0](/getting-started/whats-new-0-4/) for release highlights.
 
 ## Requirements
 

@@ -91,11 +91,11 @@ New logic belongs in `api/` with the CLI rendering it — `api/` must never impo
 Runtimes, builders, benchmarking frameworks, executors, schedulers, transports, and telemetry providers are SAF multi-extension plugins. Each is discovered by scanning its module for subclasses of a base class:
 
 ```
-cli/__init__.py → core/bootstrap.py → SAF init → find_types_in_modules() → register_plugin()
+cli/__init__.py → application.initialize() → core/bootstrap.py → SAF init → find_types_in_modules() → register_plugin()
                                                 → load_external_plugins()
 ```
 
-A plugin can gate itself behind a [feature flag](/advanced/feature-flags/) by declaring `required_feature_flag`. See [Architecture](/developer-reference/architecture/#plugin-system-saf) for the full extension-point table.
+Use `plugins enable/disable` for plugin loading policy. Individual implementations can gate their capabilities with `required_feature_flag`; see [Feature Flags](/advanced/feature-flags/). See [Architecture](/developer-reference/architecture/#plugin-system-saf) for the full extension-point table.
 
 ### Config chain (vpd)
 
@@ -126,7 +126,7 @@ Runtimes never construct an executor directly — `RuntimePlugin._resolve_execut
 
 ### SSH execution model
 
-All remote operations use **SSH stdin piping** — scripts are generated as Python strings and piped to `ssh host bash -s`. No files are ever copied to remote hosts for execution.
+All remote operations use **SSH stdin piping** — scripts are generated as Python strings and piped to `ssh host bash -s`. Prepared assets and runtime-specific helper files may also be staged; do not assume every executor uses this transport.
 
 ```python
 from sparkrun.orchestration.ssh import run_remote_script
@@ -153,19 +153,15 @@ All runtimes extend `RuntimePlugin` (`runtimes/base.py`):
 2. Set `runtime_name = "my-runtime"` and `default_image_prefix`
 3. Implement `generate_command()` and optionally `resolve_container()`
 4. For multi-node: implement `_run_cluster()` and `_stop_cluster()`
-5. Register the entry point in `pyproject.toml`:
-   ```toml
-   [project.entry-points."sparkrun.runtimes"]
-   my_runtime = "sparkrun.runtimes.my_runtime:MyRuntime"
-   ```
+5. For an installed external integration, expose a module in the shared `sparkrun.plugins` entry-point group, declare `SPARKRUN_PLUGIN_API_VERSION = 1`, and explicitly select its ID before initialization. Bundled classes are scanned from their modules. See [Plugin Development](/developer-reference/plugin-development/).
 6. Add tests in `tests/test_my_runtime.py`
 
 ## Adding a new builder
 
 1. Create `src/sparkrun/builders/my_builder.py` extending `BuilderPlugin`
 2. Set `builder_name = "my-builder"`
-3. Implement `prepare_image()` — must return the final image name
-4. Register in `pyproject.toml` under `sparkrun.builders`
+3. Implement `prepare(..., builder_context=None)` — return the final image name, or preserve it for environment-only preparation
+4. Register through a plugin module using the shared `sparkrun.plugins` group and explicit integration selection
 5. Recipes reference it as `builder: my-builder`
 
 ## Version management

@@ -3,7 +3,7 @@ title: Atlas
 description: Using Atlas (pure-Rust LLM inference server) on DGX Spark.
 ---
 
-[Atlas](https://atlasinference.io/) is a pure-Rust LLM inference server with a native NCCL-based distribution layer. sparkrun's `atlas` runtime launches `spark serve` and orchestrates the container lifecycle, NCCL bootstrap, and OpenAI-compatible HTTP endpoint.
+[Atlas](https://atlasinference.dev/) is a pure-Rust LLM inference server with a native NCCL-based distribution layer. sparkrun's `atlas` runtime launches `spark serve` and orchestrates the container lifecycle, NCCL bootstrap, and OpenAI-compatible HTTP endpoint.
 
 ## Features
 
@@ -11,7 +11,7 @@ description: Using Atlas (pure-Rust LLM inference server) on DGX Spark.
 - Native NCCL bootstrap via `--rank`, `--world-size`, `--master-addr`, and `--master-port`
 - Tensor parallelism (`--tp-size`) and expert parallelism (`--ep-size`) — both can share the same physical ranks (overlapping groups) or form an orthogonal mesh
 - Optional speculative decoding (`--speculative`, `--ngram-speculative`, `--self-speculative`), DFlash attention, and prefix caching
-- `--high-speed-swap` path that uses `io_uring` for fast KV/cache spill (containers run with `seccomp=unconfined` and `IPC_LOCK`/`SYS_NICE` capabilities)
+- `--high-speed-swap` path that uses `io_uring` for fast KV/cache spill, supported by sparkrun's [shared Docker seccomp profile](/advanced/executors/#seccomp-profiles)
 
 Atlas derives its world size from the two parallelism dimensions, so you set
 `tensor_parallel` and `ep_size` and sparkrun maps the resulting ranks onto
@@ -26,7 +26,7 @@ check before any side effects.
 
 ## Official recipe registry
 
-The Atlas maintainers publish an official sparkrun recipe registry at [Avarok-Cybersecurity/atlas-recipes](https://github.com/Avarok-Cybersecurity/atlas-recipes). Treat this as the **authoritative source for official Atlas recipes** — recipe formats, supported flags, and container tags there are kept in sync with upstream Atlas releases.
+The Atlas maintainers publish an official sparkrun recipe registry at [Atlas-Inf/sparkrun-recipes](https://github.com/Atlas-Inf/sparkrun-recipes). Treat this as the **authoritative source for official Atlas recipes** — recipe formats, supported flags, and container tags there are kept in sync with upstream Atlas releases.
 
 The `@atlas` registry is bundled as a default registry in sparkrun **v0.2.31 and later**, so it's discoverable out of the box without manual `sparkrun registry add`:
 
@@ -48,31 +48,28 @@ sparkrun run @atlas/qwen3.5-35b-a3b-nvfp4
 
 ## Container images
 
-Default image prefix: `avarok/atlas-gb10`
+Default image prefix: `azeezish/atlas-gb10`
 
 ```yaml
-container: avarok/atlas-gb10:latest
+container: azeezish/atlas-gb10:latest
 ```
 
-See the [Atlas GitHub repository](https://github.com/Avarok-Cybersecurity/atlas) for image tags and release notes.
+See the [Atlas GitHub repository](https://github.com/Atlas-Inf/atlas) for image tags and release notes.
 
 ## Example recipe
 
-This is the official `qwen3.5-35b-a3b-nvfp4` recipe from the `@atlas` registry:
+This single-node example illustrates Atlas settings. Inspect the current `@atlas` recipe before choosing an image tag or model configuration:
 
 ```yaml
 recipe_version: "2"
 model: Sehyo/Qwen3.5-35B-A3B-NVFP4
 runtime: atlas
-container: avarok/atlas-gb10:latest
+container: azeezish/atlas-gb10:latest
 max_nodes: 1
 
 metadata:
   description: |
-    Qwen3.5-35B (A3B MoE) NVFP4 + MTP — Atlas's fastest catalogued model
-    on a single GB10 (~133 tok/s decode at concurrency=1, ISL=128, OSL=128
-    per the avarok/atlas-gb10 QUICKSTART).
-  maintainer: avarok
+    Example Qwen3.5-35B (A3B MoE) NVFP4 + MTP configuration on one GB10.
   category: agent
   model_params: 35B
   model_dtype: nvfp4
@@ -103,7 +100,7 @@ These recipe `defaults` keys map to `spark serve` CLI flags:
 |---|---|---|
 | `port` | `--port` | Serving port |
 | `host` | `--host` | Bind address |
-| `tensor_parallel` | `--tp-size` | Tensor parallelism degree (distribution inference coming soon) |
+| `tensor_parallel` | `--tp-size` | Tensor parallelism degree |
 | `gpu_memory_utilization` | `--gpu-memory-utilization` | Fraction of GPU memory for the engine |
 | `max_model_len` | `--max-seq-len` | Maximum sequence length |
 | `max_num_seqs` | `--max-num-seqs` | Maximum concurrent sequences |
@@ -173,18 +170,45 @@ Atlas derives `world_size` from `tensor_parallel` and `ep_size`:
 - `world_size == tp_size * ep_size` — orthogonal mesh (TP and EP on independent ranks)
 - `world_size == tp_size == ep_size` — overlapping groups (both groups share the same physical ranks)
 
-sparkrun maps the resulting world size to physical hosts automatically. While the multi-node path is gated, set `tensor_parallel: 1` and omit `ep_size` (or set it to `1`).
+sparkrun maps the resulting world size to physical hosts automatically and launches the ranks through the native NCCL path. The earlier single-node restriction is removed in the pinned 0.4.0 source. For a single-node recipe, set `tensor_parallel: 1` and omit `ep_size` (or set it to `1`).
 
 ## Docker options
 
-Atlas containers run with extra Docker options required by its NCCL and `io_uring` paths:
+Atlas uses the [shared Docker seccomp profile](/advanced/executors/#seccomp-profiles),
+which permits `io_uring_setup`, `io_uring_enter`, and `io_uring_register` while
+retaining the rest of the bundled Moby policy. The Atlas runtime does not add
+`seccomp=unconfined`; disabling seccomp is an explicit executor configuration choice.
 
-- `--cap-add=IPC_LOCK` — required for `ibv_reg_mr` (RDMA memory registration)
-- `--cap-add=SYS_NICE` — required by the SQPOLL kernel thread used with `--high-speed-swap`
-- `--security-opt seccomp=unconfined` — Docker's default seccomp profile blocks the `io_uring_*` syscalls used by `--high-speed-swap`
+The Atlas runtime adds these capabilities on every Docker launch, including when
+`high_speed_swap` is disabled:
+
+| Option | Capability |
+| --- | --- |
+| `--cap-add=IPC_LOCK` | Permits locking memory, used by pinned-memory and RDMA paths |
+| `--cap-add=SYS_NICE` | Permits elevated scheduling and priority operations |
+
+These are Atlas additions. The shared Docker settings supply unlimited locked
+memory with `--ulimit memlock=-1:-1` for normal non-privileged launches; that limit
+is separate from the `IPC_LOCK` capability. See
+[Capabilities and locked memory](/advanced/executors/#capabilities-and-locked-memory).
+
+`SYS_NICE` describes the current launch configuration, not a universal requirement
+for high-speed swap: Linux 5.13 and later allow SQPOLL without special privileges.
+See the [Linux io_uring documentation](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html).
 
 ## References
 
-- [Atlas on GitHub](https://github.com/Avarok-Cybersecurity/atlas)
-- [Official Atlas recipe registry (@atlas)](https://github.com/Avarok-Cybersecurity/atlas-recipes)
-- [Atlas website](https://atlasinference.io/)
+- [Atlas on GitHub](https://github.com/Atlas-Inf/atlas)
+- [Official Atlas recipe registry (@atlas)](https://github.com/Atlas-Inf/sparkrun-recipes)
+- [Atlas website](https://atlasinference.dev/)
+
+## Startup and cache policy
+
+Atlas does not declare streaming inference readiness observers. Default `run`
+uses supported endpoint checks and waits for required hooks; it does not report
+unavailable first-token timings. See [run](/cli/run/).
+
+The example’s memory utilization is an explicit recipe setting, separate from
+[scheduling reservations](/advanced/schedulers/). Model files, draft models, and
+runtime caches have different validation and cleanup needs; see
+[Model Cache Management](/advanced/cache-management/).

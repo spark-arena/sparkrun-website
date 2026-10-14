@@ -132,7 +132,7 @@ sparkrun recipe validate <recipe>
 ```
 
 Check a recipe file for issues:
-- Missing required fields (`model`, `runtime`)
+- Missing required fields such as `model` and invalid/inferred runtime selection
 - Invalid `mode` values
 - `min_nodes` / `max_nodes` consistency
 - Valid `metadata.model_params` and `metadata.model_dtype`
@@ -161,3 +161,8 @@ sparkrun recipe vram <recipe> [options]
 | `--max-model-len` | Override max sequence length |
 | `--gpu-mem` | Override gpu_memory_utilization (0.0-1.0) |
 | `--no-auto-detect` | Skip HuggingFace model auto-detection |
+
+Memory estimates distinguish model weights, KV demand, and runtime overhead.
+Unknown or lower-bound cache estimates do not prove that a model fits; engine
+memory fractions and scheduler reservations are separate. See
+[Schedulers & Placement](/advanced/schedulers/).

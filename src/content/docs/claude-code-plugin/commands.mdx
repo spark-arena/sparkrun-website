@@ -11,6 +11,9 @@ description: Slash commands and skills available in the sparkrun Claude Code plu
 | `/sparkrun:stop <recipe>` | Stop a running workload |
 | `/sparkrun:status` | Check status of running workloads |
 | `/sparkrun:list [query]` | Browse and search available recipes |
+| `/sparkrun:benchmark <recipe>` | Measure performance and resume saved work |
+| `/sparkrun:monitor` | Live host/workload monitoring |
+| `/sparkrun:proxy <action>` | Manage the selected inference gateway |
 | `/sparkrun:setup` | Guided setup for sparkrun and cluster config |
 
 ## `/sparkrun:run`
@@ -61,6 +64,21 @@ Guided setup that walks through:
 2. Configuring a cluster
 3. Setting up SSH mesh
 4. Verifying the configuration
+
+## Benchmark, monitor, and proxy
+
+```text
+/sparkrun:benchmark qwen3-1.7b-sglang --cluster mylab
+/sparkrun:monitor --cluster mylab --simple
+/sparkrun:proxy status
+```
+
+Benchmarks wait for readiness and can resume saved work or retry publication.
+Use plain/JSON monitoring in noninteractive sessions. Proxy behavior follows the
+selected gateway; LiteLLM is the default on every channel, and SparkRoute requires
+separate installation and explicit selection. See [Benchmarking](/tutorials/benchmarking/)
+and [Proxy Gateway](/tutorials/proxy-gateway/). A tune slash command is not enabled
+in the pinned companion plugin.
 
 ## Automatic skills
 

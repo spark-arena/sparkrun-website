@@ -10,7 +10,7 @@ sparkrun cluster status
 sparkrun status              # alias
 ```
 
-This shows all sparkrun containers running on your cluster hosts, grouped by job.
+This shows workloads reported by enabled executors on your cluster hosts, grouped by job.
 
 ## Output
 
@@ -27,7 +27,7 @@ The status output includes copy-paste-ready `logs` and `stop` commands for each 
 :::
 
 :::note
-Pending operations are tracked via lightweight lock files. If a `sparkrun run` process is downloading a model or distributing a container image, it will appear in the pending operations section even though no container is running yet. This helps you account for upcoming VRAM usage when planning additional workloads.
+Pending operations are tracked through shared reservations. If a `sparkrun run` process is downloading a model or distributing a container image, it will appear in the pending operations section even though no container is running yet. This helps you account for upcoming VRAM usage when planning additional workloads.
 :::
 
 ## Example output
@@ -58,3 +58,13 @@ sparkrun cluster status --hosts 192.168.11.13,192.168.11.14
 ```
 
 If no options are given, uses the default cluster.
+
+## Placement, state, and cache policy
+
+Hardware inventory, per-host executor destinations, and live reservations determine
+placement. Ordinary workloads reserve accelerators exclusively; a low engine memory
+fraction does not automatically permit co-location. See [Schedulers](/advanced/schedulers/).
+Workload metadata is shared across direct and daemon calls, while daemon operation
+history is separate. Missing observations are not proof of idle capacity.
+Cluster model validation/selection/provider settings and runtime cache cleanup are
+covered in [Model Cache Management](/advanced/cache-management/).

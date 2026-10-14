@@ -1,111 +1,104 @@
 ---
 title: Execution Flow & Internals
-description: How sparkrun orchestrates builders, distribution, and runtime launches.
+description: Planning, prepared assets, distribution, destinations, readiness, and ownership.
 ---
 
-This page documents the internal execution flow of `sparkrun run` — from recipe resolution through container launch. This is reference material for developers building custom runtimes, debugging orchestration issues, or understanding sparkrun's internals.
+A frontend initializes one application context, obtains authorization, builds a
+live plan, and executes that same plan. Rendering, diagnostics and readiness
+policy belong to the frontend. See [Python API](/developer-reference/python-api/)
+for the difference between detached API submission and CLI completion.
 
 ## Launch lifecycle
 
-Every `sparkrun run` invocation follows a structured 6-phase pipeline, tracked by the `LaunchProgress` system. Each phase emits progress output at the default verbosity level, with sub-steps visible at `-v`:
+The following is an illustrative container workflow, not a fixed six-phase
+contract for every executor or plugin strategy:
 
+```text
+Resolve recipe and provenance
+  -> plan hosts, hardware, placement, executor destinations
+  -> prepare container or native assets
+  -> distribute and verify required resources per host
+  -> synchronize applicable tuning/runtime caches
+  -> validate replacement and submit workload
+  -> observe readiness and run required hooks
 ```
-[1/6] Preparing
-[2/6] Building image — skipped (no builder)
-[3/6] Distributing resources
-[4/6] Syncing tuning configs
-[5/6] Launching vLLM-distributed runtime
-  Step 1/4: Cleanup existing containers
-  Step 2/4: Detect head node IP
-  Step 3/4: Launch head node (rank 0)
-  Step 4/4: Launch worker nodes
-[6/6] Post-launch hooks
-```
+
+CLI `run` and fresh benchmarks share placement/readiness presentation. A live plan
+avoids redundant scheduling; it does not prove that cluster capacity can never
+change between preview and execution. Reservation and ownership checks still apply.
 
 ### Phase 1: Preparing
 
-Resolves recipe configuration, port availability, container image, and generates a deterministic cluster ID from the recipe + host list + overrides. Also resolves the transfer mode (`auto`/`local`/`push`/`delegated`) and builds SSH kwargs.
+Resolve effective recipe/runtime overrides, source trust, launch intent, hosts,
+transport and executor target. Probe hardware and occupancy as needed. Schedulers
+produce `RankAssignment` (`core/scheduler.py`, `schedulers/`); explicit layouts
+come from `core/layout.py`. Do not use the removed `core/placement.py` path.
 
-This phase also resolves the recipe's `mods:` field. For each `mods` entry, sparkrun looks up the named mod in the appropriate registry's `mods_subpath` (see [Manifest fields](/recipes/registries/#manifest-fields)), syncs the supporting files locally if needed, and injects the corresponding shell commands into the recipe's `pre_exec` list. The conversion is **builder-agnostic** — it runs before Phase 2 so resolution failures surface early, and so any builder (or no builder at all) sees a uniform `pre_exec` once mods are expanded.
-
-#### Placement and backend selection
-
-Before Phase 2 runs, sparkrun resolves three things from the cluster's per-host
-hardware metadata:
-
-1. **Per-host `BackendBundle`** — `core/launcher.py:resolve_per_host_backends()`
-   walks `host_list` and calls `core/backend_select.py:select_backends(hw)` on
-   each host's `HostHardware`. The result (`accelerator_vendor` +
-   `CollectiveBackend`) is threaded through to `runtime.run(..., backends=...)`
-   and persisted in job metadata. Hosts that fail to resolve a bundle (unknown
-   vendor, multi-vendor host) are dropped from the map; per-host env then flows
-   through `runtimes/_cluster_ops.py:resolve_comm_env(ctx, comm_env, backends)`,
-   which falls back to the legacy NCCL generator for those hosts —
-   byte-identical output for NVIDIA. (The old `resolve_ib_env` wrapper has been
-   removed; `resolve_comm_env` is the only path.)
-2. **Compatibility check** — for runtimes that declare `requires_capability:
-   {"rdma:roce-v2"}` (or similar), the central check
-   (`runtimes/compatibility.py:check_runtime_host_compatibility`) verifies
-   every placed host satisfies the set. Failures raise
-   `IncompatibleHardwareError` before any side effects (no container pull, no
-   model sync, no docker run).
-3. **Platform validation** — `platforms/resolve_platform(hw)` picks the
-   first matching `HardwarePlatformPlugin` (DGX Spark before Generic NVIDIA),
-   and its `validate_host(hw)` returns warning strings. sparkrun logs each
-   warning; it does not raise. Hosts without explicit metadata default to DGX
-   Spark so the check always runs against something sensible.
-
-For multi-rank workloads on heterogeneous-vendor clusters, recipes must also
-declare an explicit `layout:` block (`core/layout.py:RecipeLayout`) — an
-experimental surface, see
-[Schedulers & Placement](/advanced/schedulers/#explicit-placement-with-layout).
-The auto-packer (`core/placement.py:compute_placement`) refuses to guess which
-ranks land on which accelerator vendor.
+Hardware assessments distinguish unsupported/unknown fit from demonstrated
+capacity. DGX Spark scheduling and runtime allocation are separate policies.
+See [Schedulers](/advanced/schedulers/). Recipe `mods` expand to `pre_exec` before
+builder work, so resolution/trust failures surface early.
 
 ### Phase 2: Building image
 
-Builders prepare container images before distribution. Most recipes skip this phase — the default `docker-pull` builder is a no-op since the distribution phase handles image pulling. The `eugr` builder is the main "real" builder; it's invoked when a recipe sets `builder: eugr`, declares `build_args`, or references an eugr-nightly **sentinel image** at `:latest`. Since eugr's July 2026 move to published images the builder is pull-first — it resolves the sentinel to the authoritative nightly and pulls it, and only runs `build-and-copy.sh` when `build_args` request a wheels or custom build. See [Builders](/developer-reference/builders/).
+Builders implement `prepare(..., builder_context=None)` for image or host
+environment preparation. The default preparation leaves image refs unchanged;
+distribution owns registry pulls, with `--rebuild` requesting a fresh pull.
+Eugr can select a prebuilt image or perform an explicitly requested build.
+See [Builders](/developer-reference/builders/).
 
-For the full builder catalog, sentinel-image semantics, the `defaults.builders.eugr.use_sentinel_image` opt-out, build hygiene/observability (per-build logs, phase-aware errors, post-build flashinfer smoke test), and the `BuilderPlugin` interface, see [Builders](/developer-reference/builders/).
+The shared image planner resolves per-node images from effective recipe settings
+and hardware. Builder output is authoritative. Prepared container distribution
+policies are passed to staging instead of mutating recipe declarations.
+Image-less native assets have no container image plan; native runs do not require
+an unused image default. Container-only `materialize()` rejects native targets.
 
 ### Phase 3: Distributing resources
 
-sparkrun distributes container images and model files to all target hosts before launching. The transfer mode (set per-cluster or per-command) controls how resources flow.
+Preparation binds immutable model revisions, selected files and workload-visible
+paths. Each required target is checked for completeness and access. Built-in
+local/push/delegated/pull paths and selected providers share those guarantees.
+A provider's success receipt or byte counter is insufficient without per-host
+verification. OCI Relay remains bundled for images; other providers may be plugins.
+See [Model Cache Management](/advanced/cache-management/).
 
-Before this phase runs, sparkrun calls the runtime's `prepare()` hook (see [Recipe hooks](#recipe-hooks)), which can mutate the recipe's `distribution_config` — for example, vLLM/SGLang/Atlas all use `prepare()` to add the speculative-decoding **draft model** to the distribution list so it ships alongside the primary model.
-
-#### SSH stdin piping
-
-All remote operations use **SSH stdin piping** — scripts are generated as Python strings and piped to `ssh <host> bash -s`. No files are ever copied to remote hosts for orchestration purposes.
-
-#### Container sync
-
-Container images are distributed via `docker save | ssh docker load`. sparkrun matches images using both the local docker **image ID** and **`RepoDigests`** (the storage-driver-agnostic content hash) — a host is skipped if either matches, so the same `<registry>/<image>@sha256:...` is treated as "already present" even when local image IDs differ across drivers.
-
-#### Model sync
-
-Models are downloaded locally via HuggingFace Hub's `snapshot_download`, then rsynced to target hosts over the high-speed CX-7 network. GGUF models use colon syntax (`repo:quant`) for selective quant-file download. If `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN`) is set in the control-machine environment, sparkrun forwards it into the remote sync scripts so gated repos download successfully on workers too.
-
-#### InfiniBand / NCCL auto-configuration
-
-For multi-node workloads, sparkrun detects InfiniBand interfaces on all hosts and computes NCCL environment variables (`NCCL_SOCKET_IFNAME`, `UCX_NET_DEVICES`, etc.) automatically.
+HF snapshot copies dereference selected shared-blob links into target files.
+Known damage, permissions, missing dependencies, and mount shadowing fail
+preparation rather than silently becoming success. Offline mode can copy existing
+cluster artifacts but does not call origins or install tools. Native and container
+executors must verify access under their actual workload identity.
 
 ### Phase 4: Syncing tuning configs
 
-Syncs Triton fused MoE kernel tuning configs from registries to the local cache, then distributes them to all target hosts. Skipped when `--no-sync-tuning` is passed or for delegating runtimes.
+Applicable registry tuning and target runtime compilation caches are separate from
+model payloads. `--no-sync-tuning` skips registry tuning synchronization;
+`--no-runtime-cache` has a different purpose. Native/delegating strategies may use
+different preparation paths.
 
 ### Phase 5: Launching runtime
 
-Generates the serve command, clears the page cache (best-effort, requires sudo), configures the executor (rootless mode, user/group mapping, security options), and calls `runtime.run()`. Each runtime reports sub-steps (cleanup, IP detection, head launch, worker launch, etc.) via the progress tracker.
+Generate a nonempty serving command through the runtime's required
+`generate_command()` hook and submit to the resolved executor destination.
+Plugin run handlers call `before_start` after validation/staging and immediately
+before submission so core can perform confirmed replacement on that exact target.
+Dry runs pass no launch callback and do not submit. Check public `RunResult.rc`,
+not an assumed private launch handle.
+
+Native destinations need verified ownership/process identity and recovery state;
+metadata alone is not permission to kill a process or delete files. Kubernetes
+submission uses the optional integration's own target and reservation model.
 
 ### Phase 6: Post-launch hooks
 
-After a successful detached launch, handles post-serve lifecycle:
-1. Waits for the serve port to become ready
-2. Runs HTTP health check (if configured)
-3. Executes `post_exec` commands inside the container
-4. Executes `post_commands` (registry-defined hooks — requires `--trust` for third-party registries)
-5. Handles `stop_after_post` (auto-stop after hooks complete, used by benchmarks)
+Default CLI completion waits for readiness and required hooks. Supported Docker
+observation measures port-open, HTTP-ready, and first generated token from the
+serving container start. Endpoint readiness, request latency, and total CLI wall
+time are distinct. Unsupported observers omit timing rather than inventing it.
+
+`--no-follow` waits without model logs; `--no-ready-wait` skips observation but
+conflicts with required post hooks; `--follow` keeps watching after readiness.
+A failed wait can leave detached inference running. Ctrl+C cancels observers,
+not the detached deployment. See [run](/cli/run/#readiness-and-exit-status).
 
 ## Runtime orchestration internals
 
@@ -163,17 +156,13 @@ sparkrun sets these environment variables automatically for TRT-LLM clusters:
 
 NCCL-related variables (`NCCL_SOCKET_IFNAME`, `UCX_NET_DEVICES`, etc.) and `HF_TOKEN` are also propagated to all nodes via `mpirun -x`.
 
+
 ## Recipe hooks
 
-Recipes (and runtimes) can mutate or inject behavior at specific lifecycle points:
-
-- **`prepare()`** — runtime-side hook called between Phase 2 (Building image) and Phase 3 (Distributing resources). Runtimes use this to mutate the recipe's `distribution_config` so additional models or containers ship to all hosts. All current vLLM, SGLang, and Atlas runtimes use this to pre-sync the speculative-decoding draft model when configured. Not user-facing — implemented in runtime plugins.
-- **`pre_exec`** — recipe-level shell commands. Run after container launch but before the serve command starts. Recipe `mods:` entries are expanded into `pre_exec` during Phase 1.
-- **`post_exec`** — recipe-level shell commands. Run after a successful detached launch (Phase 6), once the serve port is ready. Executes inside the head container.
-- **`post_commands`** — registry-defined hooks that run on the host (not inside the container) after a successful launch. Requires `--trust` for third-party registries.
-
-```yaml
-pre_exec:
-  - "echo 'Preparing environment...'"
-  - "/opt/setup-script.sh"
-```
+Runtime preparation can declare additional resources such as draft models before
+staging. Recipe `pre_exec` runs before the serve command; mods feed the same path.
+`post_exec` runs inside the head workload after readiness. Registry
+`post_commands` require the applicable source authorization and run in their
+specified context. Hook completion is part of the default CLI success boundary.
+Use the public [feedback interface](/developer-reference/feedback/) to report
+stages, hosts, counters and outcomes; activity success is not operation success.

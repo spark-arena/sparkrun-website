@@ -28,7 +28,7 @@ export default function Footer() {
         <div className="footer-column">
           <h4>Community</h4>
           <ul>
-            <li><a href="https://discord.gg/dTWzMC2u">Discord</a></li>
+            <li><a href="https://discord.gg/GH5kRgv6ZD">Discord</a></li>
             <li><a href="https://x.com/spark_arena">X / Twitter</a></li>
             <li><a href="https://github.com/spark-arena/sparkrun">GitHub</a></li>
             <li><a href="https://github.com/spark-arena/sparkrun/issues">Issues</a></li>
@@ -37,10 +37,7 @@ export default function Footer() {
         </div>
       </div>
       <div className="footer-bottom">
-        <p>Apache 2.0 License</p>
-        <div className="footer-powered">
-          Part of the <a href="https://spark-arena.com">Spark Arena</a> ecosystem &middot; Powered by <a href="https://scitrera.ai">scitrera.ai</a>
-        </div>
+        <p>Code &amp; examples: <a href="https://github.com/spark-arena/sparkrun-website/blob/main/LICENSE">Apache-2.0</a> · Documentation: <a href="https://github.com/spark-arena/sparkrun-website/blob/main/LICENSE-docs">CC BY 4.0</a></p>
       </div>
     </footer>
   );

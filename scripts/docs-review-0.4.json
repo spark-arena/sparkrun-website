@@ -1,0 +1,502 @@
+{
+  "review_date": "2026-10-13",
+  "reference": "scripts/docs-contracts.json",
+  "release_status": "prepared for 0.4.0 release; publication and portable-platform checks remain release gates",
+  "scope": {
+    "existing_pages": 53,
+    "new_pages": 13
+  },
+  "review_groups": {
+    "getting-started": {
+      "focus": "Readiness, installation/update boundaries, hardware-aware setup, SSH identity and diagnostics.",
+      "sources": [
+        "docs/STARTUP_READINESS.md",
+        "docs/SETUP_STEPS.md",
+        "docs/PLUGINS.md",
+        "docs/SECURITY.md",
+        "src/sparkrun/api/setup/"
+      ],
+      "tests": [
+        "tests/test_run_timings_readiness.py",
+        "tests/test_setup_ssh_identity.py",
+        "tests/test_setup_ssh_rotation.py"
+      ]
+    },
+    "cli": {
+      "focus": "Command paths/options via isolated Click parsing; lifecycle, defaults and cross-links.",
+      "sources": [
+        "src/sparkrun/cli/",
+        "docs/PLUGINS.md",
+        "docs/DAEMON.md",
+        "docs/MODEL_CACHE.md"
+      ]
+    },
+    "clusters": {
+      "focus": "Hardware placement, observed status, executor destinations, reservations and cache policy.",
+      "sources": [
+        "src/sparkrun/core/scheduler.py",
+        "src/sparkrun/core/coordination.py",
+        "src/sparkrun/api/_status.py"
+      ]
+    },
+    "runtimes": {
+      "focus": "Runtime declarations and image defaults, memory policy, readiness/cache applicability; Atlas multi-node validation.",
+      "sources": [
+        "src/sparkrun/runtimes/",
+        "src/sparkrun/platforms/dgx_spark.py"
+      ],
+      "tests": [
+        "tests/test_runtime_atlas.py",
+        "tests/test_readiness_capabilities.py"
+      ]
+    },
+    "advanced": {
+      "focus": "Managed plugins, daemon lifecycle/security and workload management, model-cache usage/pins/claims and optional LRU cleanup, model transfers, runtime caches, and feature gates.",
+      "sources": [
+        "docs/PLUGINS.md",
+        "docs/DAEMON.md",
+        "docs/MODEL_CACHE.md",
+        "docs/SECURITY.md",
+        "src/sparkrun/core/features.py",
+        "src/sparkrun/platforms/dgx_spark.py",
+        "src/sparkrun/daemon/http_routes.py",
+        "src/sparkrun/core/daemon_registry.py",
+        "docs/DAEMON_API.md",
+        "src/sparkrun/daemon/workloads.py",
+        "src/sparkrun/daemon/server.py",
+        "src/sparkrun/api/model_cache.py",
+        "src/sparkrun/models/cache.py",
+        "src/sparkrun/models/usage.py",
+        "src/sparkrun/models/_cache_agent.py"
+      ],
+      "tests": [
+        "tests/test_managed_plugins.py",
+        "tests/test_daemon_portable.py",
+        "tests/test_setup_ssh_rotation.py",
+        "tests/test_daemon_http_routes.py",
+        "tests/test_daemon_naming.py",
+        "tests/test_model_cache_retention.py"
+      ]
+    },
+    "developer-reference": {
+      "focus": "Public API imports/options, initialization and lazy installed integration, extension execution/feedback/benchmark contracts, current source layout. Daemon routes, complete operation argument inventory, result/error contracts, manager identity, and framework-free extension declarations. Expanded plugin authoring coverage: catalogs, CLI commands/options, recipe keys/formats, setup/hardware, execution families and strategies, distribution/gateway providers, benchmark hooks, workload lifecycle, configuration and rollback. Plugin loading policy and static manifests, lifecycle planning, bounded plugin diagnostics, shared capture, reusable log targets, native Kubernetes sources, daemon artifact downloads and result validation.",
+      "sources": [
+        "docs/DISTRIBUTION_API_MIGRATION.md",
+        "docs/APPLICATION_PROFILES.md",
+        "docs/CATALOG_API.md",
+        "docs/PLUGINS.md",
+        "docs/FEEDBACK.md",
+        "docs/BENCHMARK_API.md",
+        "docs/DAEMON_API.md",
+        "docs/MODEL_CACHE.md",
+        "docs/SETUP_STEPS.md",
+        "docs/MULTIPLATFORM.md",
+        "src/sparkrun/core/registry_defaults.py",
+        "src/sparkrun/core/cli_registry.py",
+        "src/sparkrun/core/recipe_formats.py",
+        "src/sparkrun/core/workload_lifecycle.py",
+        "docs/DIAGNOSTICS_API.md",
+        "docs/LOGGING_API.md",
+        "src/sparkrun/plugin_lifecycle.py",
+        "src/sparkrun/core/plugin_policy.py",
+        "src/sparkrun/core/daemon_schema.py",
+        "src/sparkrun/diagnostics/"
+      ],
+      "tests": [
+        "tests/test_documentation_contracts.py",
+        "tests/test_feedback.py",
+        "tests/test_tool_eval_progress.py",
+        "tests/test_plugin_diagnostics.py",
+        "tests/test_plugin_lifecycle_controls.py",
+        "tests/test_api_diagnostics.py"
+      ]
+    },
+    "recipes": {
+      "focus": "Builder prepare contract, readiness and resource validation/selection, GGUF/projectors and registry trust.",
+      "sources": [
+        "docs/MODEL_CACHE.md",
+        "docs/STARTUP_READINESS.md",
+        "src/sparkrun/builders/base.py",
+        "src/sparkrun/core/recipe.py"
+      ]
+    },
+    "claude-code-plugin": {
+      "focus": "Shipped command names/examples, current gateway selection and direct-CLI lifecycle.",
+      "sources": [
+        "sparkrun-cc-plugin/",
+        "docs/PROXY.md",
+        "docs/SPARKROUTE.md"
+      ]
+    },
+    "tutorials": {
+      "focus": "End-to-end readiness, benchmark integrations/progress/resume, gateway installation/selection and placement.",
+      "sources": [
+        "docs/STARTUP_READINESS.md",
+        "docs/BENCHMARK_API.md",
+        "docs/PROXY.md",
+        "docs/SPARKROUTE.md"
+      ],
+      "tests": [
+        "tests/test_run_timings_readiness.py",
+        "tests/test_tool_eval_progress.py"
+      ]
+    },
+    "landing": {
+      "focus": "Footer promotion/legal/community links, readiness/fit copy, historical demo label and responsive/theme behavior.",
+      "sources": [
+        "LICENSE",
+        "LICENSE-docs",
+        "docs/STARTUP_READINESS.md"
+      ]
+    }
+  },
+  "pages": [
+    {
+      "page": "advanced/cache-management.mdx",
+      "group": "advanced",
+      "status": "added"
+    },
+    {
+      "page": "advanced/daemon.mdx",
+      "group": "advanced",
+      "status": "added"
+    },
+    {
+      "page": "advanced/executors.mdx",
+      "group": "advanced",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "advanced/feature-flags.mdx",
+      "group": "advanced",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "advanced/multiplatform.mdx",
+      "group": "advanced",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "advanced/plugins.mdx",
+      "group": "advanced",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "advanced/schedulers.mdx",
+      "group": "advanced",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "advanced/security.mdx",
+      "group": "advanced",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "claude-code-plugin/commands.mdx",
+      "group": "claude-code-plugin",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "claude-code-plugin/overview.mdx",
+      "group": "claude-code-plugin",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/benchmark.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/cluster-commands.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/daemon.mdx",
+      "group": "cli",
+      "status": "added"
+    },
+    {
+      "page": "cli/export.mdx",
+      "group": "cli",
+      "status": "reviewed-retained"
+    },
+    {
+      "page": "cli/logs.mdx",
+      "group": "cli",
+      "status": "reviewed-retained"
+    },
+    {
+      "page": "cli/model-cache.mdx",
+      "group": "cli",
+      "status": "added"
+    },
+    {
+      "page": "cli/overview.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/plugins.mdx",
+      "group": "cli",
+      "status": "added"
+    },
+    {
+      "page": "cli/proxy.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/recipe-commands.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/run.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/setup-commands.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/status.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/stop.mdx",
+      "group": "cli",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "cli/tune.mdx",
+      "group": "cli",
+      "status": "reviewed-retained"
+    },
+    {
+      "page": "clusters/creating.mdx",
+      "group": "clusters",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "clusters/managing.mdx",
+      "group": "clusters",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "clusters/status.mdx",
+      "group": "clusters",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/architecture.mdx",
+      "group": "developer-reference",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/benchmark-api.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "developer-reference/builders.mdx",
+      "group": "developer-reference",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/cli-automation.mdx",
+      "group": "developer-reference",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/contributing.mdx",
+      "group": "developer-reference",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/daemon-api.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "developer-reference/diagnostics-api.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "developer-reference/execution-flow.mdx",
+      "group": "developer-reference",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/feedback.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "developer-reference/logging-api.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "developer-reference/plugin-development.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "developer-reference/python-api.mdx",
+      "group": "developer-reference",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "developer-reference/runtime-implementations.mdx",
+      "group": "developer-reference",
+      "status": "added"
+    },
+    {
+      "page": "getting-started/diagnostics.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/installation.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/networking.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/quick-start.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/setup-wizard.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/ssh-setup.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/troubleshooting.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/updates.mdx",
+      "group": "getting-started",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "getting-started/whats-new-0-4.mdx",
+      "group": "getting-started",
+      "status": "added"
+    },
+    {
+      "page": "index.mdx",
+      "group": "landing",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "recipes/format.mdx",
+      "group": "recipes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "recipes/gguf-recipes.mdx",
+      "group": "recipes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "recipes/registries.mdx",
+      "group": "recipes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "recipes/writing-recipes.mdx",
+      "group": "recipes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/atlas.mdx",
+      "group": "runtimes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/llama-cpp.mdx",
+      "group": "runtimes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/overview.mdx",
+      "group": "runtimes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/sglang.mdx",
+      "group": "runtimes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/trtllm.mdx",
+      "group": "runtimes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "runtimes/vllm.mdx",
+      "group": "runtimes",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "tutorials/benchmarking.mdx",
+      "group": "tutorials",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "tutorials/first-model.mdx",
+      "group": "tutorials",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "tutorials/multi-node.mdx",
+      "group": "tutorials",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "tutorials/proxy-gateway.mdx",
+      "group": "tutorials",
+      "status": "reviewed-updated"
+    },
+    {
+      "page": "tutorials/spark-arena.mdx",
+      "group": "tutorials",
+      "status": "reviewed-updated"
+    }
+  ],
+  "validation": {
+    "contracts": "35 Python fences, 57 imports, 6 option constructors, 533 CLI examples; all six stable/beta/alpha and advanced off/on combinations pass against cf5e16b9a44079288fd0a712e240d250a3f69b07. Installed fixtures verify lazy/console-free initialization, command callbacks with a stubbed host probe, registry and recipe behavior, benchmark/setup/runtime contracts, literal manifests, lifecycle plan idempotence, plugin diagnostic ownership/redaction, disabled builders, nested capture, and closed reporters. Network and subprocess calls remain denied.",
+    "core_documentation_tests": "73 passed during the initial review; behavioral tests listed by group were reviewed, not run against live systems.",
+    "astro": "Type/content check: zero errors, warnings or hints. Production build succeeds.",
+    "links": "7052 internal links/anchors across 68 HTML pages and 65 sidebar entries. Earlier external source/community/license checks are historical and do not assert remote availability of the updated source pin.",
+    "browser": "32 checks across eight updated pages at 1440px/390px in light/dark themes: Plugin Development, Diagnostics API, Logging API, Daemon API, Managed Plugins, Feature Flags, Diagnostics, and What’s New. No page overflow or browser errors; verified new anchors, all 92 expandable bundled operations, diagnostic fields, and absence of external plugin coverage in Daemon API. Desktop plugin and mobile diagnostics screenshots inspected. Artifacts: /tmp/sparkrun-docs-review/plugin-sync-browser.json and sync-*.png. Earlier reviews cover the homepage, footer, runtime and cache pages.",
+    "limitations": [
+      "No live cluster, SSH rotation, plugin acquisition or exposed daemon used for validation.",
+      "No deployment performed."
+    ],
+    "daemon_api": "All 92 bundled operations (84 core, 8 Kubernetes) match the pinned inventory, with the two hidden benchmark failure-policy arguments intentionally omitted from website tables. The generator comparison verifies that no other fields are removed. Internal proxy.serve/watch no longer appear as public operations; diagnostics.collect and collect_diagnostics arguments added. Added artifact route, workload_id log filters, supported schema vocabulary and result validation. Sync excludes external sections and normalizes the outdated Kubernetes parent-gate sentence to current plugin-loading policy. No daemon or handlers started.",
+    "model_cache": "Reviewed commit 32c519b, MODEL_CACHE.md, CLI/API/daemon declarations, usage tracking and host cleanup implementation, and retention tests. Documented preview defaults, per-cache byte targets, protected content, pinning, claim reconciliation, automatic cleanup and host requirements. No model cache was pruned or otherwise changed during validation.",
+    "plugin_development": "Reviewed recent commits through cf5e16b, including plugin loading controls, static declarations and capability labels, lifecycle plans, shared logging, diagnostic bundles/reporters, and independent DEBUG capture. Website samples are exercised from their actual code fences, including a loader namespace correction found by verification. The committed source snapshot in /tmp was used while upstream work continued; no upstream files were edited and no host probes, acquisition, setup actions, or workloads ran.",
+    "arena_cli": "Replaced benchmark submission examples with sparkrun benchmark <recipe> --arena throughout both tutorials and the CLI overview/reference. Arena group guidance covers login/logout/status. Documented standard resume-by-ID for upload retry. All six contract configurations, production build, internal links, and four mobile local-preview pages pass. No authentication, workloads, or uploads performed. Artifacts: /tmp/sparkrun-docs-review/arena-*.txt and arena-browser.json.",
+    "benchmark_failure_policy": "Checked current CLI declaration and changelog: the failure-policy controls are unconditionally hidden, while current default behavior remains stop-on-task-failure. Removed the controls entirely from tutorial/reference prose, option tables, and generated daemon argument tables per user direction. Guidance now describes failure and resume behavior without advertising those controls. Build, internal links, generator comparison and local preview checked; no benchmark executed.",
+    "cache_title": "Page title, sidebar, and incoming link labels now read Model Cache Management; the /advanced/cache-management/ route and anchors are preserved. Build/internal links and mobile local preview checked."
+  }
+}

@@ -85,3 +85,14 @@ This is still evolving upstream. The fastest DGX Spark interconnect uses NCCL an
 
 For best performance, use llama.cpp for single node only and use vLLM or SGLang for multi-node workloads.
 :::
+
+## Startup and cache policy
+
+llama.cpp does not declare the streaming readiness observers used by vLLM and
+SGLang. Startup uses the available endpoint checks without inventing inference
+or first-token timings. See [run](/cli/run/).
+
+On DGX Spark, mmap defaults to off unless the recipe explicitly sets `mmap: true`.
+GGUF selections and multimodal projectors must be available at the resolved
+revision on every required target. See [GGUF Recipes](/recipes/gguf-recipes/) and
+[Model Cache Management](/advanced/cache-management/) for inventory validation and repair.

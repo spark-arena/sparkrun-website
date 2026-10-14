@@ -44,7 +44,7 @@ To build locally from upstream wheels instead, opt in explicitly with
 `build_args: ["--use-wheels"]` in the recipe.
 :::
 
-To pin a specific image rather than tracking the nightly, use any non-`:latest` tag (e.g. `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:2026-03-01`) — sparkrun pulls that immutable tag as-is.
+To pin a specific image rather than tracking the nightly, use any non-`:latest` tag (e.g. `ghcr.io/spark-arena/dgx-vllm-eugr-nightly:2026-03-01`) — sparkrun uses that tag as-is. Tags can be moved upstream; use a digest when content identity must be immutable.
 
 See [Phase 2: Building image](/developer-reference/execution-flow/#phase-2-building-image) for the full builder lifecycle.
 
@@ -167,3 +167,15 @@ Both variants support the same models and vLLM flags. The difference is in multi
 - **`vllm-ray`** provides Ray's cluster management, dashboard, and monitoring. Use it when you need Ray-specific features.
 
 For single-node (solo) workloads, both variants behave identically.
+
+## Startup and cache policy
+
+Default `run` follows startup logs until readiness and required hooks complete.
+vLLM declares streaming Chat Completions, Responses, and Messages probes plus a
+`/health` endpoint. Which observations run depends on executor support; missing
+observers do not produce inferred timing values. See [run](/cli/run/).
+
+On DGX Spark, sparkrun supplies `gpu_memory_utilization: 0.80` only when the
+recipe and overrides leave it unset. This serving setting is separate from the
+[scheduler’s 0.90 cap](/advanced/schedulers/). Runtime compilation caches are
+separate from model files; see [Model Cache Management](/advanced/cache-management/).

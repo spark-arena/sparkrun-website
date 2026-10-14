@@ -15,7 +15,10 @@ Running `sparkrun setup` with no subcommand auto-launches the wizard when no def
 
 ## What the wizard does
 
-Each phase is optional — you can skip any step and come back to it later with the individual `sparkrun setup <command>` subcommands.
+Setup is built from the resolved **hardware/executor plan**, shared with read-only
+readiness probes. The numbered phases and output below are a DGX Spark Docker
+example, not a fixed sequence for every platform. Supported optional steps can be
+skipped and revisited; hard prerequisites still need satisfying before launch.
 
 | Phase | What it does | Why it matters |
 |---|---|---|
@@ -26,7 +29,7 @@ Each phase is optional — you can skip any step and come back to it later with 
 | 3. CX7 networking | Configures high-speed ConnectX-7 interfaces | Enables fast NCCL communication and data transfers between nodes |
 | 3b. SSH re-mesh | Re-runs the mesh when CX7 changed any IPs | Keeps every interface reachable, automatically |
 | 4. Docker group | Adds your user to the `docker` group | So you can run containers without sudo |
-| 4b. NVIDIA CDI | Generates `/etc/cdi/nvidia.yaml` | sparkrun requests GPUs via CDI, so containers get no GPU without it |
+| GPU access | Checks toolkit and the resolved GPU access mode | DGX Spark Docker defaults to `gpus`; CDI generation applies only when selected/required |
 | 5. Sudoers entries | Installs scoped sudo rules | Allows automatic cache permission fixes and page cache clearing |
 | 6. earlyoom | Installs OOM protection | Prevents system hangs when models approach the 128 GB memory limit |
 
@@ -84,7 +87,7 @@ SSH username [drew]: dgxuser
 Created cluster 'mylab' with 2 host(s), set as default.
 ```
 
-Pick any name you like. The **first host** in the list becomes the head node for multi-node jobs. The SSH username should be the same user account on all your Sparks.
+Pick any name you like. The first host of the **scheduled placement** becomes head; it can differ from the first saved host under occupancy scheduling. The SSH username should be the same user account on all your Sparks.
 
 :::note
 If you already have a cluster configured, the wizard offers to reuse it instead of creating a new one.
@@ -108,7 +111,7 @@ turns "the wizard failed halfway through" into a single answerable question.
 
 The probe distinguishes three outcomes, and only the first is offered a key:
 
-- **Reachable but rejecting the key** — a bootstrap candidate; the wizard offers to install one, generating `~/.ssh/sparkrun_ed25519` if you have no identity yet.
+- **Reachable but rejecting the key** — a bootstrap candidate; the wizard offers to install one, reusing an existing identity when possible; newly generated Sparkrun-owned keys live beside the active config under `ssh/sparkrun_ed25519`.
 - **Host key changed** — never auto-fixed. This can indicate a genuinely different machine, so you resolve it yourself.
 - **Unreachable** — a network or `sshd` problem, not something a key installation would solve.
 
@@ -158,7 +161,7 @@ This phase configures the ConnectX-7 high-speed network interfaces on each DGX S
 4. **Sets MTU 9000** (jumbo frames) for maximum throughput
 5. **Applies netplan** configuration and distributes host keys
 
-If your CX7 interfaces are already configured correctly, this phase skips them automatically.
+Saved topology is reused, and already-satisfied mesh/CX7 steps are skipped. Changing requested subnet or MTU can require another confirmation even when the links are already configured.
 
 :::note
 This phase only appears when CX7 interfaces are detected on your hosts and you have 2+ hosts. For single-node setups, CX7 configuration isn't needed.
@@ -183,29 +186,15 @@ sparkrun runs Docker commands over SSH. Your user needs to be in the `docker` gr
 
 ## Phase 4b: NVIDIA CDI
 
-```
-Phase 4b: NVIDIA CDI (Container Device Interface)
-------------------------------
-Generates /etc/cdi/nvidia.yaml so Docker can access the GPU(s).
-Generate the NVIDIA CDI spec on all hosts? [Y/n]: y
-```
+This conditional step appears when the hardware/executor plan requires CDI.
+DGX Spark Docker defaults to `gpu_access_mode: gpus`, using Docker GPU access
+rather than universally requiring `/etc/cdi/nvidia.yaml`. A selected CDI mode uses
+`--device nvidia.com/gpu=all` and requires a valid generated spec and toolkit.
 
-sparkrun requests GPUs as `--device nvidia.com/gpu=all`, which Docker resolves
-through `/etc/cdi/nvidia.yaml`. Without that spec a container starts but sees
-no GPU, so this phase runs `nvidia-ctk cdi generate` on each host.
-
-The script skips itself where `nvidia-ctk` is absent, so a host without the
-NVIDIA Container Toolkit reports as skipped rather than failing the wizard.
-
-:::caution[Regenerate after a driver upgrade]
-The spec pins absolute paths to versioned driver libraries. An NVIDIA driver
-update moves them, leaving a spec that resolves to nothing — and containers
-that fail with `unresolvable CDI devices`.
-
-`sparkrun setup check` flags this: it counts how many referenced paths still
-exist and warns when any are missing. See
-[GPU not visible in containers](/getting-started/troubleshooting/#gpu-not-visible-in-containers-missing-cdi-spec).
-:::
+For CDI targets, the wizard can run `nvidia-ctk cdi generate`; read-only
+`setup check` detects missing/stale referenced paths. Regenerate the spec after
+a driver change **when CDI is in use**. For `gpus` mode, diagnose Docker/toolkit
+access first. See [GPU troubleshooting](/getting-started/troubleshooting/#gpu-not-visible-in-containers-missing-cdi-spec).
 
 ## Phase 5: Sudoers entries
 
@@ -221,7 +210,7 @@ This installs two minimal, scoped sudoers rules on each host:
 - **fix-permissions** — allows sparkrun to fix HuggingFace cache ownership without a password. Docker containers create cache files as root, which can break subsequent runs. See [HuggingFace cache owned by root](/getting-started/troubleshooting/#huggingface-cache-owned-by-root).
 - **clear-cache** — allows sparkrun to drop the Linux page cache before launching containers, freeing memory for inference. See [Linux page cache consuming memory](/getting-started/troubleshooting/#linux-page-cache-consuming-memory).
 
-These rules grant **only** the specific operations needed — no broad sudo privileges. You may be prompted for your sudo password once.
+These rules grant **only** the specific operations needed — no broad sudo privileges. The shared sudo mechanism first checks passwordless access and then authenticates each host as needed; passwords need not be identical. Rules are scoped and platform-gated.
 
 ## Phase 6: earlyoom
 
@@ -252,7 +241,7 @@ Setup Complete!
   CX7:        configured (192.168.11.0/24, 192.168.12.0/24)
   SSH remesh: OK
   Docker:     OK (2/2)
-  CDI:        OK (2/2)
+  GPU access: gpus (CDI not required in this example)
   Sudoers:    installed (fix-permissions, clear-cache)
   earlyoom:   installed
 
@@ -290,7 +279,7 @@ gap.
 
 ## Non-interactive mode
 
-For scripted or CI/CD setups, use `--yes` to accept all defaults:
+For scripted setup, `--yes` accepts safe defaults. It **does not rotate SSH server identities**; deliberate unattended rotation uses the separate `setup ssh-rotate-keys --yes` command:
 
 ```bash
 sparkrun setup wizard --yes --hosts 10.24.11.13,10.24.11.14 --cluster mylab
@@ -303,3 +292,12 @@ sparkrun setup wizard --dry-run --hosts 10.24.11.13,10.24.11.14
 ```
 
 See [Setup Commands](/cli/setup-commands/) for the full reference of all wizard options and individual setup subcommands.
+
+## Cloned-host identity audit
+
+The shared `ssh_identity` step independently checks duplicate SSH server public
+keys and machine IDs; a working mesh does not prove uniqueness. A complete audit
+can offer confirmed rotation and mesh refresh, with machine-ID regeneration and
+a reboot reminder when needed. Declining leaves warnings. Incomplete probes never
+report verified uniqueness. `setup check` always remains read-only. See
+[SSH identity audit and recovery](/getting-started/ssh-setup/#ssh-host-identity-audit-and-rotation).

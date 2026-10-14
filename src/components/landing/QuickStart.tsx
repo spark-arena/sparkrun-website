@@ -23,7 +23,7 @@ export default function QuickStart() {
           <div className="step-number">3</div>
           <div className="step-content">
             <h3>Run inference</h3>
-            <p>Pick a recipe, launch it. Your model is serving — Ctrl+C safely detaches from logs.</p>
+            <p>Pick a recipe and follow startup until readiness is confirmed. Use --follow to keep watching logs; Ctrl+C detaches from the workload.</p>
             <pre className="sl-code"><code>sparkrun run qwen3-1.7b-vllm</code></pre>
           </div>
         </div>

@@ -7,7 +7,9 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "deploy": "astro build && wrangler deploy"
+    "deploy": "astro build && wrangler deploy",
+    "check:links": "python3 scripts/check-built-links.py",
+    "check:contracts": "python3 scripts/check-docs-contracts.py"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.8",

@@ -28,15 +28,15 @@ Use `sparkrun show` to see whether a model fits on a single node:
 sparkrun show qwen3-30b-a3b-vllm
 ```
 
-The VRAM estimate tells you the expected memory usage at the default tensor parallelism. To see the estimate at a different TP level, use the `-o` override:
+The VRAM estimate tells you the expected memory usage at the default tensor parallelism. To see the estimate at a different TP level, use the `--tp` override:
 
 ```bash
 # Compare VRAM at TP=1 vs TP=2
 sparkrun show qwen3-30b-a3b-vllm
-sparkrun show qwen3-30b-a3b-vllm -o tensor_parallel=2
+sparkrun show qwen3-30b-a3b-vllm --tp 2
 ```
 
-If the estimate at TP=1 exceeds 128 GB, you need multi-node.
+Assess the estimate against usable capacity, including runtime/KV overhead and the 0.90 scheduling cap. Unknown/MLA/hybrid lower-bound estimates do not establish fit. See [Memory-aware fit](/advanced/schedulers/#memory-aware-fit).
 
 :::tip
 Some recipes set a `min_nodes` value that enforces a minimum TP. sparkrun will tell you if a recipe requires more nodes than you've specified.
@@ -66,6 +66,7 @@ When you launch a multi-node job, sparkrun:
 4. **Syncs the model** to all hosts (uses InfiniBand IPs for fast rsync when available)
 5. **Starts containers on all placed hosts** — the first host of the placement becomes the head node, the others are workers
 6. **Establishes distributed communication** between nodes (via Ray, native distributed init, or RPC depending on the runtime)
+7. **Waits for readiness and required hooks**, then returns; `--follow` keeps observing
 
 The head node runs the inference API endpoint. Worker nodes participate in tensor-parallel computation but don't serve HTTP traffic.
 

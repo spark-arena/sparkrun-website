@@ -7,7 +7,12 @@ description: Stop a running inference workload.
 sparkrun stop [target] [options]
 ```
 
-Stop containers for a running inference workload across all hosts. TARGET can be a recipe name or a cluster ID (from `sparkrun status` output). When `--all` is used, TARGET is optional and all sparkrun containers will be stopped.
+Stop a running inference workload across its executor destinations. TARGET can be a recipe name or a cluster ID (from `sparkrun status` output). When `--all` is used, TARGET is optional and discovered sparkrun workloads on the selected cluster will be stopped.
+
+Confirmed stops release the workload's model-cache claims on the stopped hosts
+and restart the cache retention age. If claim release fails, retry normal stop.
+See [cache claim reconciliation](/advanced/cache-management/#workload-claims-and-reconciliation)
+when workload metadata is missing; stopping workloads does not itself delete model files.
 
 ## Options
 

@@ -5,13 +5,14 @@ description: Submit benchmark results to the Spark Arena leaderboard and compare
 
 [Spark Arena](https://spark-arena.com) is a community leaderboard for DGX Spark inference performance. sparkrun integrates directly with Spark Arena — authenticate, benchmark, and submit results all from the CLI.
 
-After logging in, the `sparkrun arena benchmark` command handles the rest:
+Use `sparkrun arena` for `login`, `logout`, and `status`. After logging in,
+`sparkrun benchmark <recipe> --arena` runs the benchmark and submits its results:
 
 1. **Launches** the inference server
-2. **Benchmarks** using the standardized `spark-arena-v1` profile
+2. **Benchmarks** using the standardized `@official/spark-arena-v2` profile
 3. **Collects** results (CSV, metadata, effective recipe)
-4. **Uploads** everything to the Spark Arena leaderboard
-5. **Stops** the inference server
+4. **Stops** the inference server launched for the benchmark
+5. **Uploads** the submission to the Spark Arena leaderboard
 
 ## 1. Log in to Spark Arena
 
@@ -38,26 +39,28 @@ sparkrun arena status
 With authentication in place, run a benchmark and submit in one step:
 
 ```bash
-sparkrun arena benchmark qwen3-1.7b-sglang
+sparkrun benchmark qwen3-1.7b-sglang --arena
 ```
 
 This uses your default cluster. To target a specific cluster or hosts:
 
 ```bash
 # Use a saved cluster
-sparkrun arena benchmark qwen3-1.7b-sglang --cluster mylab
+sparkrun benchmark qwen3-1.7b-sglang --arena --cluster mylab
 
 # Or specify hosts directly
-sparkrun arena benchmark qwen3-1.7b-sglang --hosts 10.24.11.13,10.24.11.14
+sparkrun benchmark qwen3-1.7b-sglang --arena --hosts 10.24.11.13,10.24.11.14
 ```
 
 For multi-node benchmarks, set tensor parallelism:
 
 ```bash
-sparkrun arena benchmark qwen3-1.7b-sglang --tp 2
+sparkrun benchmark qwen3-1.7b-sglang --arena --tp 2
 ```
 
-The standardized `spark-arena-v1` benchmark profile is used automatically — this ensures all submissions are comparable on the leaderboard.
+`--arena` enables Spark Arena submission and defaults to the standardized
+`@official/spark-arena-v2` profile. You can use the same option with the explicit
+`benchmark perf` subcommand. An explicit `--profile` takes precedence.
 
 ## 3. What gets submitted
 
@@ -77,27 +80,29 @@ You can apply the same recipe overrides as `sparkrun run`:
 
 ```bash
 # Override GPU memory utilization
-sparkrun arena benchmark qwen3-1.7b-sglang -o gpu_memory_utilization=0.9
+sparkrun benchmark qwen3-1.7b-sglang --arena -o gpu_memory_utilization=0.9
 
 # Override max model length
-sparkrun arena benchmark qwen3-1.7b-sglang -o max_model_len=8192
+sparkrun benchmark qwen3-1.7b-sglang --arena -o max_model_len=8192
 
 # Override container image
-sparkrun arena benchmark qwen3-1.7b-sglang --image my-custom-image:latest
+sparkrun benchmark qwen3-1.7b-sglang --arena --image my-custom-image:latest
 ```
 
 These overrides are captured in the submission metadata, so the leaderboard accurately reflects your exact configuration.
 
 ## 5. Resumable submissions
 
-Long `spark-arena-v1` sweeps are checkpointed after every benchmark task, so if a submission is interrupted partway through — Ctrl+C, OOM, network blip, anything — just re-run the exact same command and sparkrun picks up where it left off, skipping the tasks that already completed.
+Long `@official/spark-arena-v2` sweeps are checkpointed after every benchmark task.
+If a run is interrupted, use the same recipe and settings plus `--resume` to
+continue without prompting, skipping completed tasks.
 
 ```bash
 # First attempt — interrupted partway through
-sparkrun arena benchmark qwen3-1.7b-sglang --cluster mylab --tp 2
+sparkrun benchmark qwen3-1.7b-sglang --arena --cluster mylab --tp 2
 
-# Re-run — sparkrun resumes the sweep and submits when complete
-sparkrun arena benchmark qwen3-1.7b-sglang --cluster mylab --tp 2
+# Resume without prompting, then submit when complete
+sparkrun benchmark qwen3-1.7b-sglang --arena --cluster mylab --tp 2 --resume
 ```
 
 sparkrun also **pins the benchmarking framework version** (e.g. the `llama-benchy` release) on the first task of a run and reuses that exact version for every subsequent task — even after a resume — so the numbers you submit are internally consistent. The pinned version is captured in the uploaded `metadata.json`.
@@ -117,3 +122,19 @@ sparkrun arena logout
 - Browse the [Spark Arena leaderboard](https://spark-arena.com) to see community results
 - Try different recipes and runtimes to find the best configuration for your workload
 - See [Benchmarking Models](/tutorials/benchmarking/) for more on sparkrun's benchmark system (custom profiles, parameters, comparing configurations)
+
+## Publication recovery
+
+Measurement completion is independent of upload success. Keep the saved benchmark
+or submission reference after an interrupted upload; retry completed-state
+publication without launching inference or remeasuring. Reacquire credentials at
+execution time rather than embedding them in benchmark checkpoints. Resume the
+saved benchmark by ID:
+
+```bash
+sparkrun benchmark resume <benchmark-id>
+```
+
+The saved run retains its Arena integration and submission ID, so this retries
+publication without adding `--arena` again. See
+[Benchmark API](/developer-reference/benchmark-api/#results-and-finalization-retry).

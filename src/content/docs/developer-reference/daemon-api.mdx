@@ -1,0 +1,2095 @@
+---
+title: Daemon API
+description: HTTP routes, operation arguments, permissions, job and result contracts, workload identity, and plugin extensions.
+---
+
+The daemon exposes authenticated JSON operations and SSE streams over HTTP
+protocol **1** (`/v1`). This reference covers the API bundled with sparkrun:
+**84 core operations** and **8 Kubernetes operations**. Availability depends on
+plugin loading policy, capability flags, and the caller's permissions.
+Use the running daemon's `GET /v1/ops` response to discover its supported API.
+
+See [Daemon Mode](/advanced/daemon/) for startup, secure connections, configuration,
+gateway discovery, and recovery. The [daemon CLI](/cli/daemon/) is a reference client.
+
+## Requests and jobs
+
+Send a JSON object to either `POST /v1/ops/{name}` or the operation's advertised
+`http_path`. Both use the same authentication, schema validation, idempotency,
+and admission path. For example, `workloads.run` has alias
+`POST /v1/workloads/run`. Query aliases also use **POST**, with `{}` when there
+are no arguments.
+
+| Kind | HTTP response | Where to read the result |
+| --- | --- | --- |
+| `query` | 200 with the declared result | Response body; no durable job is created |
+| `job` | 202 with `job_id` and `events_url` | `GET /v1/jobs/{id}` → `result` after success |
+| `stream` | Dedicated SSE endpoint | Stream events; no automatic POST alias |
+
+A job acknowledgement looks like:
+
+```json
+{
+  "job_id": "JOB_ID",
+  "events_url": "/v1/jobs/JOB_ID/events"
+}
+```
+
+A `query` is bounded inline execution and may include administrative mutations.
+Its permission and description determine what it does. Only operations declaring
+`cacheable: true` use the short query cache.
+
+HTTP 202 confirms acceptance. It does not mean that the operation succeeded.
+A workload's `cluster_id` identifies a deployment; a daemon `job_id` identifies
+one invocation. Benchmark IDs are separate again.
+
+For a cluster-create request with an admin token:
+
+```python
+from pathlib import Path
+from sparkrun.daemon.client import Client
+
+client = Client(
+    url="https://controller:8443",
+    token=Path("/private/daemon.token").read_text().strip(),
+    ca_cert="/private/ca.pem",
+)
+info = client.info()  # Checks the HTTP protocol; includes the credential's manager.
+operations = client.request("GET", "/v1/ops")
+create = next(op for op in operations if op["name"] == "cluster.create")
+submission = client.request(
+    "POST",
+    create["http_path"],
+    {"name": "lab", "hosts": ["spark-a", "spark-b"]},
+    headers={"Idempotency-Key": "create-lab-001"},
+)
+job = client.request("GET", f"/v1/jobs/{submission['job_id']}")
+```
+
+Poll the job until terminal, or follow its event stream and then fetch the job.
+Use `result` on success and inspect `error` on failure. A run plan is a display
+preview, not a resumable execution handle; the live worker retains its resolved
+plan through approval, readiness, and post-launch hooks.
+
+### States, prompts, and cancellation
+
+Nonterminal states are `queued`, `starting`, `running`, `waiting_input`, and
+`cancelling`. Terminal states are `succeeded`, `failed`, `cancelled`, and `lost`.
+
+For a pending prompt, obtain the user's answer and send exactly `prompt_id` and
+`value` to `POST /v1/jobs/{id}/input`. Approval/decision values are booleans;
+secret values are strings and require separate secret-prompt permission.
+Use the ID supplied by the job's current `prompt`:
+
+```json
+{"prompt_id": "PROMPT_ID_FROM_JOB", "value": true}
+```
+
+Prompt metadata is durable, while secret answers remain in worker memory and
+are redacted from subsequent events/results. The default prompt timeout is
+300 seconds. Do not place credentials in operation arguments or log messages.
+
+`DELETE /v1/jobs/{id}` requests cancellation. It does not delete history or roll
+back remote effects. Disconnecting a client does not cancel a job. A lost worker
+is never automatically rerun; inspect and reconcile uncertain effects before
+starting another mutation.
+
+### Idempotency
+
+Set `Idempotency-Key` on job submissions. The key is scoped to the authenticated
+principal: the same operation, version, arguments, and manager return the same
+job through either URL. A conflicting submission returns 409. A later intentional
+action needs a new key.
+
+Idempotency is bounded by retention. Terminal results/events default to seven
+days; idempotency tombstones remain for 30 days, and active jobs retain their
+keys beyond that window. After a lost response, inspect the existing job or retry
+with the same key. Never treat a disconnect, expired key, or `retryable` error as
+authorization to submit an uncertain mutation with a fresh key.
+
+## Authentication and identity
+
+TCP requires a bearer token, including loopback. `/v1/health` is the only public
+route. Same-user Unix peers without a bearer token have local admin and secret
+permissions; an explicit bearer selects its own scope and manager on Unix sockets.
+Remote TCP requires TLS unless the server explicitly permits plaintext.
+
+Permissions are hierarchical: `read` → `operate` → `admin`. Secret-prompt permission
+is independent. Non-admin principals see only their own jobs and must retain the
+operation's permission to inspect or answer them. Tokens are issued, listed, and
+revoked locally through `sparkrun daemon token`; there is no HTTP token-admin API.
+`X-Sparkrun-Client` is only an advisory display label.
+
+| Identity | Meaning |
+| --- | --- |
+| Authenticated principal | Owns daemon jobs and scopes retry keys |
+| Credential `manager` | Stable workload management identity, reported by `/v1/info` |
+| Operation `owner` | Plugin declaration owner from its loader; `core` for host operations |
+| Workload `owner` | Manager recorded for the deployed workload |
+
+The default workload manager is `daemon`. A locally issued
+`daemon token create NAME --manager automation` credential grants manager
+`automation`; operation arguments cannot select it. Non-default manager tokens
+issued by the CLI/integration helper share principal `manager:<name>`, preserving
+access to retained jobs and retry keys across credential replacement. Accepted
+jobs keep their admitted identity after token revocation.
+
+`workloads.run` and `workloads.ensure_ready` use the manager for new workload
+ownership. Adoption of an existing healthy endpoint does not transfer ownership.
+Guarded stop/sleep/wake/reconcile require the matching owner, exact workload ID,
+and recipe revision. Another manager can observe or route to a healthy endpoint.
+`workloads.stop_matching` and `workloads.stop_all` remain broad operator controls.
+This is an automation guard within a single-account permission model, not tenant
+isolation. Manager identity is separate from permission scope and does not narrow
+the permissions granted to a credential.
+
+Recipe-hook trust remains separate: TCP requests need both server opt-in and
+explicit `trust: true`. See [Security & Trust](/advanced/security/) and
+[Daemon Mode](/advanced/daemon/#operations-jobs-and-prompts).
+
+## Discovery and schemas
+
+`GET /v1/ops` returns a list filtered by permissions and feature flags. Each
+entry contains `name`, `owner`, `local_name`, `version`, `kind`, `scope`,
+`description`, `resources`, `http_path`, `request_schema`, and `result_schema`.
+Use these advertised names and paths rather than reconstructing plugin URLs.
+All operations in this reference currently have operation version **1**, separate
+from the HTTP protocol version.
+
+`/openapi.json` describes all registered operations, including higher-scope and
+feature-disabled declarations. It is not a filtered capability list. The Swagger
+UI at `/docs` supports bearer authorization. An alias's OpenAPI response schema
+for a job describes its acknowledgement; `x-sparkrun-operation.result` points to
+its final result schema.
+
+OpenAPI also describes Job, Prompt, Error, Event, and Info envelopes. Successful
+job results discriminate by operation name and version. Query and worker results
+are encoded, redacted, and validated against their declared schemas before being
+cached or stored. Invalid results produce `ResultContractError` with code
+`invalid_operation_result`. Stored job results have a 2 MiB encoded-size limit;
+request safety limits are distinct from result constraints.
+
+Omit optional request fields unless the schema explicitly permits `null`.
+Requests reject unknown top-level fields. The operation entries below list documented
+top-level arguments and whether they are required. `null` means the published schema
+accepts it; it does not guarantee identical normalization by every underlying API.
+Consult discovery/OpenAPI for nested properties, enums, bounds, and full result
+schemas. Results may be objects, arrays, or booleans; there is no universal
+success envelope shared by queries and jobs.
+
+Reservation policies describe worker execution claims:
+
+| Policy | Meaning |
+| --- | --- |
+| `auto` | Infer destinations; unresolved mutations use a conservative controller-wide claim |
+| `controller` | Explicit controller-wide reservation |
+| `none` | Skip the worker reservation; handlers may still take domain locks or public-API reservations |
+
+These policies do not bypass authorization. Host-owned `proxy.serve` and
+`proxy.watch` are persistent service jobs, admitted against `daemon.max_services`
+(default 2), separately from `daemon.max_jobs` (default 4). Manage their ownership
+through public proxy/discovery controls. These internal executors have no public
+operation catalog entry, HTTP alias, or submission endpoint.
+
+## Infrastructure routes
+
+These routes manage the daemon, jobs, streams, and reservations; they are separate
+from generated operation aliases.
+
+| Method | Path | Permission | Behavior / input |
+| --- | --- | --- | --- |
+| GET | `/v1/health` | public | Liveness and protocol; not worker readiness. |
+| GET | `/v1/info` | read | Profile/config binding, runtime identity, restart-required state. |
+| GET | `/v1/ops` | read | Authorized, feature-filtered operation metadata and request/result schemas. |
+| POST | `/v1/ops/{name}` | selected operation | Generic dispatcher; JSON arguments, query 200 or job 202. |
+| GET | `/v1/jobs` | read + job visibility | Optional `state`, `limit` (default 200; clamped 1–1000); bounded list, no cursor. |
+| GET | `/v1/jobs/{id}` | job owner/admin + operation scope | Durable state, result/error, public prompt metadata; no raw arguments, worker nonce or runtime lease. |
+| DELETE | `/v1/jobs/{id}` | job access + operate | Requests cancellation; does **not** delete history or promise remote rollback. |
+| POST | `/v1/jobs/{id}/input` | job access + operation scope; secret if needed | Exactly `prompt_id`, `value`; answer a live worker prompt. |
+| GET | `/v1/jobs/{id}/artifacts/diagnostics` | job owner/admin + operation scope | Finished job's NDJSON artifact; expires with job history. |
+| GET | `/v1/jobs/{id}/events` | job access | Durable SSE; `Last-Event-ID`; expired cursor → 410, later expiry → `gap` event. |
+| GET | `/v1/events` | read + job visibility | SSE snapshots of visible jobs every 2 seconds; no inventory stream or replay cursor. |
+| GET | `/v1/streams/logs` | read | SSE; optional `workload_id`, `recipe`, comma-separated `hosts`, `cluster`, `host`, `container`, `source_id`, `scope=head/all`, nonnegative `tail`, `follow=true/false`. Disconnect cancels readers. |
+| GET | `/v1/streams/monitor` | read | SSE; optional comma-separated `hosts`, `cluster`, `interval` (1–60 seconds). Shared latest frames, not durable history. |
+| GET | `/v1/reservations` | admin | Execution claims and verified owner liveness; dead claims remain until reconciled. |
+| POST | `/v1/reservations/{owner}/reconcile` | admin | `{"acknowledge_effects":true}`; releases only a verified dead owner's claims. |
+| GET | `/v1/snapshots/{name}` | read | Advisory snapshot of `discovery.snapshot`; no other selector is accepted. |
+| POST | `/v1/maintenance` | admin | `{"drain":true/false}`; admission control, not worker cancellation. |
+| POST | `/v1/shutdown` | admin | `{}`; stops API process, workers continue. |
+| GET | `/openapi.json` | authenticated | Full registered operation schemas, including feature-disabled or higher-scope declarations; not the filtered capability view. |
+| GET | `/docs` | read | Swagger UI; same authorization boundary. |
+
+## Streams
+
+Log streams resolve saved Docker or native Kubernetes workloads. `hosts` specifies
+the full topology; use `host`, `container`, or opaque `source_id` to select sources.
+Unknown/invalid query parameters are rejected before streaming. Records include
+source identity and native resource metadata where applicable. Reader failures
+become SSE errors; disconnect cancels finite and following readers. Reads never
+remove saved workload metadata or release cache claims. See
+[Logging API](/developer-reference/logging-api/) for ordering, source changes, and
+cancellation. There is no daemon paging route or server-side log target ID.
+
+Job feedback at `/v1/jobs/{id}/events` supports durable replay with `Last-Event-ID`.
+An expired cursor returns 410; expiry after connection produces a `gap` event.
+Fetch current job state, then resume from available history. Results too large
+for an event must be fetched from the job endpoint.
+
+`/v1/events` sends snapshots of visible jobs every two seconds, without a replay
+cursor. Logs and monitoring have their own streams and are not job feedback.
+No combined log/monitor or MCP route is mounted.
+
+## Diagnostic bundles
+
+Submit `diagnostics.collect` through `POST /v1/diagnostics/collect` or its generic
+operation URL. It is a read-scoped **job**, with optional `hosts`, `cluster`,
+`workload_id`, `log_tail`, `max_bytes`, and `dry_run`. Clients cannot provide server
+output paths or privileged-probe credentials. Its result includes section/host
+status and an `artifact` descriptor (`name`, `media_type`, `size_bytes`, `url`).
+
+`workloads.run`, `benchmarks.run`, and `benchmarks.resume` also accept
+`collect_diagnostics: true`. This captures the entire adapter, including readiness
+and hooks, while preserving the operation's ordinary result/error schema. An
+`artifact` event announces the bundle; its URL is also derivable from the job ID:
+
+```text
+GET /v1/jobs/{job_id}/artifacts/diagnostics
+```
+
+Download after the job finishes, including failed or cancelled jobs that produced
+a bundle. Access follows job ownership and operation permissions; retention
+follows job history. Lost workers may leave incomplete files: inspect
+`bundle_complete`, `partial`, and `truncated`. The reference CLI prints results
+and events; use an HTTP client to download the artifact. See
+[Diagnostics API](/developer-reference/diagnostics-api/) for capture scope,
+redaction, size limits, and plugin diagnostic sections.
+
+## Choosing an operation
+
+Names use `domain.action`, with underscores inside multiword actions. Python library names are independent of the daemon operation vocabulary.
+Use canonical names such as `workloads.run`; retired flat daemon names have no aliases.
+
+| Surface | Meaning |
+| --- | --- |
+| `/v1/jobs` | Durable daemon invocation history, prompts, results and events. |
+| `workloads.list` | Saved deployment metadata; does not probe current health. |
+| `workloads.inventory` | Recorded provider lifecycle/ownership/action inventory. |
+| `cluster.observe` / `cluster.report` | Raw host occupancy and coverage / grouped, metadata-enriched display report. |
+| `workloads.plan` / `workloads.run` | Resolve placement / launch and optionally await readiness and post-launch hooks. |
+| `workloads.ensure_ready` | Adopt, recover or launch with durable effect receipts and exact revision identity. |
+| `workloads.stop` | Exact-ID/revision teardown of an integration-owned workload. |
+| `workloads.stop_matching` / `workloads.stop_all` | Explicit selector-based teardown / host-wide teardown; distinct from ownership-guarded automation. |
+| `workloads.materialize` | Resolve container launch units without launching. |
+| `recipes.plan_build` / `recipes.build` | Plan / prepare native or image environments and stage assets without starting inference. |
+| `recipes.validate` / `recipes.realize` | Validate a recipe / export a placed, pinned realization. |
+| `catalog.search` / `catalog.recipes` | Simple recipe summaries / paginated catalog browsing and facets. |
+| `catalog.registries.*` | Named admin actions: add, remove, enable, disable, trust, untrust; no action-dispatch field. |
+| `benchmarks.run` / `benchmarks.resume` | Execute a benchmark / resume by benchmark ID, separate from the daemon job ID. |
+| `discovery.snapshot` | Scoped endpoint observations with original timestamp, host coverage and errors. |
+| `model_cache.list` / `model_cache.prune` | Cache-local usage/protection inventory / preview or apply LRU cleanup. |
+| `model_cache.pin` / `model_cache.reconcile` | Retain an immutable revision / explicitly release an inactive workload claim. |
+
+Registry `add` requires name and URL and never grants trust. `trust` requires
+`acknowledge_trust: true`. Each registry action rejects irrelevant fields. Advisory
+snapshots use `/v1/snapshots/discovery.snapshot`, with the same coverage-bearing
+result as the corresponding operation. Plugin endpoint projections retain their
+own namespaces and routing-policy fields.
+
+### Model-cache retention
+
+`model_cache.list` requires `read`, `model_cache.pin` requires `operate`, and
+`model_cache.prune` / `model_cache.reconcile` require `admin`. All four are jobs
+and return the usual 202 acknowledgement before their final reports are available.
+
+Prune defaults to `dry_run: true` and `min_age_days: 7`. Set `dry_run: false` to
+apply a reviewed policy. Without a byte target it selects every eligible revision
+older than the minimum age; `max_bytes` budgets private tracked-snapshot allocations,
+while `min_free_bytes` targets filesystem free space. Both are per-cache targets.
+Protection rules are preserved even when a target cannot be met.
+
+Pinning defaults to `pinned: true`; use `false` to remove the pin. Pin and reconcile
+require a full immutable revision. Reconciliation additionally requires an exact
+`claim` and `confirm_inactive: true`, supplied only after inspecting every host
+covered by that claim and stopping all associated workloads and launches.
+It removes the protection record without deleting model files.
+
+Final results are arrays of host reports with `cache_root`, `entries`, `dry_run`,
+`planned_bytes`, `reclaimed_bytes`, `free_bytes`, and `target_met`. Prune adds
+`free_bytes_after`. Entries describe tracking, usage, pins, claims, eligibility,
+protection `reason`, and any `action`. A successful job can still report
+`target_met: false`; clients must inspect the report. Shared HF blobs are never
+deleted, and shared-cache reports must not be summed as independent copies.
+See [Model Cache Management](/advanced/cache-management/#usage-tracking-and-retention).
+
+{/* BEGIN DAEMON OPERATION REFERENCE */}
+
+## Core operations
+
+### benchmarks
+
+<details id="benchmarks-resume">
+<summary><code>benchmarks.resume</code> — job / operate</summary>
+
+**POST** `/v1/benchmarks/resume`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `benchmark_id` | `string` | Yes |
+| `dry_run` | `boolean` | No |
+| `integrations` | `object` | No |
+| `export_files` | `boolean` | No |
+| `output_file` | `string` | No |
+| `timeout` | `integer` | No |
+| `api_key_env` | `string` | No |
+| `collect_diagnostics` | `boolean` | No |
+
+</details>
+
+<details id="benchmarks-run">
+<summary><code>benchmarks.run</code> — job / operate</summary>
+
+**POST** `/v1/benchmarks/run`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `category` | `string` | No |
+| `framework` | `string` | No |
+| `profile` | `string` | No |
+| `bench_args` | `object` | No |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `resume` | `string` | No |
+| `skip_run` | `boolean` | No |
+| `no_stop` | `boolean` | No |
+| `timeout` | `integer` | No |
+| `api_key_env` | `string` | No |
+| `integrations` | `object` | No |
+| `output_file` | `string` | No |
+| `export_files` | `boolean` | No |
+| `solo` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `scheduler` | `string` | No |
+| `rootful` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `offline` | `boolean` | No |
+| `sync_tuning` | `boolean` | No |
+| `extra_docker_opts` | `string[]` | No |
+| `collect_diagnostics` | `boolean` | No |
+
+</details>
+
+### catalog
+
+<details id="catalog-capacity">
+<summary><code>catalog.capacity</code> — job / read</summary>
+
+**POST** `/v1/catalog/capacity`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cluster` | `string` | Yes |
+
+</details>
+
+<details id="catalog-cleanup">
+<summary><code>catalog.cleanup</code> — job / operate</summary>
+
+**POST** `/v1/catalog/cleanup`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="catalog-clusters">
+<summary><code>catalog.clusters</code> — query / read</summary>
+
+**POST** `/v1/catalog/clusters`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="catalog-import">
+<summary><code>catalog.import</code> — job / operate</summary>
+
+**POST** `/v1/catalog/import`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `content` | `string` | Yes |
+
+</details>
+
+<details id="catalog-recipe">
+<summary><code>catalog.recipe</code> — job / read</summary>
+
+**POST** `/v1/catalog/recipe`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `reference` | `string` | Yes |
+| `overrides` | `object` | No |
+| `expected_revision` | `string` | No |
+
+</details>
+
+<details id="catalog-recipes">
+<summary><code>catalog.recipes</code> — query / read</summary>
+
+**POST** `/v1/catalog/recipes`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `query` | `string` | No |
+| `registry` | `string` | No |
+| `runtime` | `string` | No |
+| `local_only` | `boolean` | No |
+| `offset` | `integer` | No |
+| `limit` | `integer` | No |
+| `filters` | `object` | No |
+
+</details>
+
+<details id="catalog-refresh">
+<summary><code>catalog.refresh</code> — job / operate</summary>
+
+**POST** `/v1/catalog/refresh`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="catalog-registries">
+<summary><code>catalog.registries</code> — query / read</summary>
+
+**POST** `/v1/catalog/registries`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="catalog-registries-add">
+<summary><code>catalog.registries.add</code> — job / admin</summary>
+
+**POST** `/v1/catalog/registries/add`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+| `url` | `string` | Yes |
+| `subpath` | `string` | No |
+
+</details>
+
+<details id="catalog-registries-disable">
+<summary><code>catalog.registries.disable</code> — job / admin</summary>
+
+**POST** `/v1/catalog/registries/disable`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+
+</details>
+
+<details id="catalog-registries-enable">
+<summary><code>catalog.registries.enable</code> — job / admin</summary>
+
+**POST** `/v1/catalog/registries/enable`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+
+</details>
+
+<details id="catalog-registries-remove">
+<summary><code>catalog.registries.remove</code> — job / admin</summary>
+
+**POST** `/v1/catalog/registries/remove`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+
+</details>
+
+<details id="catalog-registries-trust">
+<summary><code>catalog.registries.trust</code> — job / admin</summary>
+
+**POST** `/v1/catalog/registries/trust`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+| `acknowledge_trust` | `boolean` | Yes |
+
+</details>
+
+<details id="catalog-registries-untrust">
+<summary><code>catalog.registries.untrust</code> — job / admin</summary>
+
+**POST** `/v1/catalog/registries/untrust`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+
+</details>
+
+<details id="catalog-retain">
+<summary><code>catalog.retain</code> — job / operate</summary>
+
+**POST** `/v1/catalog/retain`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `reference` | `string` | Yes |
+
+</details>
+
+<details id="catalog-search">
+<summary><code>catalog.search</code> — query / read</summary>
+
+**POST** `/v1/catalog/search`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `query` | `string` | No |
+| `registry` | `string` | No |
+| `runtime` | `string` | No |
+| `include_hidden` | `boolean` | No |
+| `include_local` | `boolean` | No |
+| `unique_names` | `boolean` | No |
+
+</details>
+
+### cluster
+
+<details id="cluster-create">
+<summary><code>cluster.create</code> — job / admin</summary>
+
+**POST** `/v1/cluster/create`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+| `hosts` | `string[]` | Yes |
+| `description` | `string` | No |
+| `user` | `string` | No |
+
+</details>
+
+<details id="cluster-default">
+<summary><code>cluster.default</code> — job / admin</summary>
+
+**POST** `/v1/cluster/default`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string/null` | No |
+
+</details>
+
+<details id="cluster-delete">
+<summary><code>cluster.delete</code> — job / admin</summary>
+
+**POST** `/v1/cluster/delete`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+
+</details>
+
+<details id="cluster-observe">
+<summary><code>cluster.observe</code> — job / read</summary>
+
+**POST** `/v1/cluster/observe`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | Yes |
+| `cluster` | `string` | No |
+| `executor` | `string` | No |
+
+</details>
+
+<details id="cluster-report">
+<summary><code>cluster.report</code> — job / read</summary>
+
+**POST** `/v1/cluster/report`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | Yes |
+| `cluster` | `string` | No |
+| `executor` | `string` | No |
+
+</details>
+
+<details id="cluster-update">
+<summary><code>cluster.update</code> — job / admin</summary>
+
+**POST** `/v1/cluster/update`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `description` | `string` | No |
+| `user` | `string` | No |
+
+</details>
+
+### diagnostics
+
+<details id="diagnostics-collect">
+<summary><code>diagnostics.collect</code> — job / read</summary>
+
+**POST** `/v1/diagnostics/collect`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `workload_id` | `string` | No |
+| `log_tail` | `integer` | No |
+| `max_bytes` | `integer` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+### discovery
+
+<details id="discovery-snapshot">
+<summary><code>discovery.snapshot</code> — job / read</summary>
+
+**POST** `/v1/discovery/snapshot`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `cluster_ids` | `string[]` | No |
+
+</details>
+
+### model_cache
+
+<details id="model_cache-import">
+<summary><code>model_cache.import</code> — job / operate</summary>
+
+**POST** `/v1/model_cache/import`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `model` | `string` | Yes |
+| `revision` | `string` | No |
+| `endpoint` | `string` | No |
+| `projector` | `string` | No |
+| `file_selection` | `string` | No |
+| `manifest` | `object` | Yes |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `checksums` | `boolean` | No |
+
+</details>
+
+<details id="model_cache-inspect">
+<summary><code>model_cache.inspect</code> — job / read</summary>
+
+**POST** `/v1/model_cache/inspect`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `model` | `string` | Yes |
+| `revision` | `string` | No |
+| `endpoint` | `string` | No |
+| `projector` | `string` | No |
+| `file_selection` | `string` | No |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `checksums` | `boolean` | No |
+
+</details>
+
+<details id="model_cache-list">
+<summary><code>model_cache.list</code> — job / read</summary>
+
+**POST** `/v1/model_cache/list`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+
+</details>
+
+<details id="model_cache-pin">
+<summary><code>model_cache.pin</code> — job / operate</summary>
+
+**POST** `/v1/model_cache/pin`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `model` | `string` | Yes |
+| `revision` | `string` | Yes |
+| `endpoint` | `string` | No |
+| `pinned` | `boolean` | No |
+
+</details>
+
+<details id="model_cache-prune">
+<summary><code>model_cache.prune</code> — job / admin</summary>
+
+**POST** `/v1/model_cache/prune`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `dry_run` | `boolean` | No |
+| `min_age_days` | `number` | No |
+| `max_bytes` | `integer` | No |
+| `min_free_bytes` | `integer` | No |
+
+</details>
+
+<details id="model_cache-reconcile">
+<summary><code>model_cache.reconcile</code> — job / admin</summary>
+
+**POST** `/v1/model_cache/reconcile`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `model` | `string` | Yes |
+| `revision` | `string` | Yes |
+| `endpoint` | `string` | No |
+| `claim` | `string` | Yes |
+| `confirm_inactive` | `boolean` | Yes |
+
+</details>
+
+<details id="model_cache-repair">
+<summary><code>model_cache.repair</code> — job / operate</summary>
+
+**POST** `/v1/model_cache/repair`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `model` | `string` | Yes |
+| `revision` | `string` | No |
+| `endpoint` | `string` | No |
+| `projector` | `string` | No |
+| `file_selection` | `string` | No |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `local_cache_dir` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `checksums` | `boolean` | No |
+| `offline` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="model_cache-resolve">
+<summary><code>model_cache.resolve</code> — job / read</summary>
+
+**POST** `/v1/model_cache/resolve`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `model` | `string` | Yes |
+| `revision` | `string` | No |
+| `endpoint` | `string` | No |
+| `projector` | `string` | No |
+| `file_selection` | `string` | No |
+| `cache_dir` | `string` | No |
+
+</details>
+
+### proxy
+
+<details id="proxy-add_alias">
+<summary><code>proxy.add_alias</code> — job / admin</summary>
+
+**POST** `/v1/proxy/add_alias`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `alias` | `string` | Yes |
+| `target` | `string` | Yes |
+
+</details>
+
+<details id="proxy-discovery-ensure">
+<summary><code>proxy.discovery.ensure</code> — query / admin</summary>
+
+**POST** `/v1/proxy/discovery/ensure`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `generation` | `string` | Yes |
+
+</details>
+
+<details id="proxy-discovery-status">
+<summary><code>proxy.discovery.status</code> — query / admin</summary>
+
+**POST** `/v1/proxy/discovery/status`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="proxy-discovery-stop">
+<summary><code>proxy.discovery.stop</code> — query / admin</summary>
+
+**POST** `/v1/proxy/discovery/stop`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="proxy-install_service">
+<summary><code>proxy.install_service</code> — job / admin</summary>
+
+**POST** `/v1/proxy/install_service`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `scope` | `string` | No |
+| `cluster` | `string` | No |
+| `now` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="proxy-list_aliases">
+<summary><code>proxy.list_aliases</code> — query / read</summary>
+
+**POST** `/v1/proxy/list_aliases`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="proxy-list_gateways">
+<summary><code>proxy.list_gateways</code> — query / read</summary>
+
+**POST** `/v1/proxy/list_gateways`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="proxy-models">
+<summary><code>proxy.models</code> — job / read</summary>
+
+**POST** `/v1/proxy/models`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="proxy-register_loaded_model">
+<summary><code>proxy.register_loaded_model</code> — job / operate</summary>
+
+**POST** `/v1/proxy/register_loaded_model`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `overrides` | `object` | No |
+| `cluster` | `string` | No |
+
+</details>
+
+<details id="proxy-remove_alias">
+<summary><code>proxy.remove_alias</code> — job / admin</summary>
+
+**POST** `/v1/proxy/remove_alias`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `alias` | `string` | Yes |
+
+</details>
+
+<details id="proxy-resolve_gateway">
+<summary><code>proxy.resolve_gateway</code> — query / read</summary>
+
+**POST** `/v1/proxy/resolve_gateway`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | No |
+
+</details>
+
+<details id="proxy-service_status">
+<summary><code>proxy.service_status</code> — job / admin</summary>
+
+**POST** `/v1/proxy/service_status`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `scope` | `string` | No |
+| `journal_lines` | `integer` | No |
+
+</details>
+
+<details id="proxy-start">
+<summary><code>proxy.start</code> — job / operate</summary>
+
+**POST** `/v1/proxy/start`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `host` | `string` | No |
+| `port` | `integer` | No |
+| `gateway` | `string` | No |
+| `host_filter` | `string[]` | No |
+| `cluster` | `string` | No |
+| `clear_cluster` | `boolean` | No |
+| `auto_discover` | `boolean` | No |
+| `discovery_backend` | `string` | No |
+| `discover_interval` | `integer` | No |
+| `discover_removal_grace_sweeps` | `integer` | No |
+| `restart` | `boolean` | No |
+| `persist` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="proxy-status">
+<summary><code>proxy.status</code> — job / read</summary>
+
+**POST** `/v1/proxy/status`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="proxy-stop">
+<summary><code>proxy.stop</code> — job / operate</summary>
+
+**POST** `/v1/proxy/stop`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="proxy-sync">
+<summary><code>proxy.sync</code> — job / operate</summary>
+
+**POST** `/v1/proxy/sync`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `aliases` | `object` | No |
+| `host_filter` | `string[]` | No |
+
+</details>
+
+<details id="proxy-uninstall_service">
+<summary><code>proxy.uninstall_service</code> — job / admin</summary>
+
+**POST** `/v1/proxy/uninstall_service`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `scope` | `string` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="proxy-unregister_loaded_model">
+<summary><code>proxy.unregister_loaded_model</code> — job / operate</summary>
+
+**POST** `/v1/proxy/unregister_loaded_model`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+
+</details>
+
+### recipes
+
+<details id="recipes-build">
+<summary><code>recipes.build</code> — job / operate</summary>
+
+**POST** `/v1/recipes/build`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `dry_run` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `rebuild` | `boolean` | No |
+| `executor` | `string` | No |
+| `executor_config` | `object` | No |
+| `cache_dir` | `string` | No |
+| `local_cache_dir` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `transfer_interface` | `string` | No |
+| `topology` | `string` | No |
+| `sync_tuning` | `boolean` | No |
+| `preserve_model_perms` | `boolean` | No |
+| `skip_model_fan_out` | `boolean` | No |
+| `builder_context` | `object` | No |
+
+</details>
+
+<details id="recipes-plan_build">
+<summary><code>recipes.plan_build</code> — job / read</summary>
+
+**POST** `/v1/recipes/plan_build`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `dry_run` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `rebuild` | `boolean` | No |
+| `executor` | `string` | No |
+| `executor_config` | `object` | No |
+| `cache_dir` | `string` | No |
+| `local_cache_dir` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `transfer_interface` | `string` | No |
+| `topology` | `string` | No |
+| `sync_tuning` | `boolean` | No |
+| `preserve_model_perms` | `boolean` | No |
+| `skip_model_fan_out` | `boolean` | No |
+| `builder_context` | `object` | No |
+
+</details>
+
+<details id="recipes-realize">
+<summary><code>recipes.realize</code> — job / operate</summary>
+
+**POST** `/v1/recipes/realize`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `strategy_options` | `object` | No |
+| `solo` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `ensure` | `boolean` | No |
+| `scheduler` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `cache_dir` | `string` | No |
+| `offline` | `boolean` | No |
+| `runtime_cache` | `boolean` | No |
+| `auto_port` | `boolean` | No |
+| `ray_port` | `integer` | No |
+| `dashboard_port` | `integer` | No |
+| `dashboard` | `boolean` | No |
+| `init_port` | `integer` | No |
+| `executor` | `string` | No |
+| `executor_config` | `object` | No |
+| `rootful` | `boolean` | No |
+| `cluster_id_override` | `string` | No |
+| `transfer_interface` | `string` | No |
+| `local_cache_dir` | `string` | No |
+| `sync_tuning` | `boolean` | No |
+| `extra_docker_opts` | `string[]` | No |
+| `topology` | `string` | No |
+| `preserve_model_perms` | `boolean` | No |
+| `skip_model_fan_out` | `boolean` | No |
+| `recipe_ref` | `string` | No |
+
+</details>
+
+<details id="recipes-validate">
+<summary><code>recipes.validate</code> — job / read</summary>
+
+**POST** `/v1/recipes/validate`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `overrides` | `object` | No |
+
+</details>
+
+### setup
+
+<details id="setup-ensure_local_key">
+<summary><code>setup.ensure_local_key</code> — job / admin</summary>
+
+**POST** `/v1/setup/ensure_local_key`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `preferred` | `string` | No |
+| `generate` | `boolean` | No |
+
+</details>
+
+<details id="setup-mesh_ssh_keys">
+<summary><code>setup.mesh_ssh_keys</code> — job / admin</summary>
+
+**POST** `/v1/setup/mesh_ssh_keys`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | Yes |
+| `user` | `string` | No |
+| `key` | `string` | No |
+| `timeout` | `integer` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="setup-plan">
+<summary><code>setup.plan</code> — job / read</summary>
+
+**POST** `/v1/setup/plan`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+
+</details>
+
+<details id="setup-probe_hosts">
+<summary><code>setup.probe_hosts</code> — job / read</summary>
+
+**POST** `/v1/setup/probe_hosts`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+
+</details>
+
+<details id="setup-probe_ssh_access">
+<summary><code>setup.probe_ssh_access</code> — job / read</summary>
+
+**POST** `/v1/setup/probe_ssh_access`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | Yes |
+| `user` | `string` | No |
+| `key` | `string` | No |
+| `timeout` | `integer` | No |
+| `max_workers` | `integer` | No |
+
+</details>
+
+<details id="setup-rdma_test">
+<summary><code>setup.rdma_test</code> — job / operate</summary>
+
+**POST** `/v1/setup/rdma_test`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `suite` | `string` | No |
+| `parallel_pairs` | `integer` | No |
+| `full` | `boolean` | No |
+| `image` | `string` | No |
+| `duration` | `integer` | No |
+| `queue_pairs` | `integer` | No |
+| `msg_size` | `string` | No |
+| `nccl_binary` | `string` | No |
+| `gid_index` | `integer` | No |
+| `link_type` | `string` | No |
+| `force_container` | `boolean` | No |
+| `keep_containers` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="setup-run_steps">
+<summary><code>setup.run_steps</code> — job / admin</summary>
+
+**POST** `/v1/setup/run_steps`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `dry_run` | `boolean` | No |
+| `only_steps` | `string[]` | No |
+
+</details>
+
+<details id="setup-undo">
+<summary><code>setup.undo</code> — job / admin</summary>
+
+**POST** `/v1/setup/undo`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cluster` | `string` | Yes |
+| `dry_run` | `boolean` | No |
+| `only_steps` | `string[]` | No |
+
+</details>
+
+### tailscale
+
+<details id="tailscale-down">
+<summary><code>tailscale.down</code> — job / admin</summary>
+
+**POST** `/v1/tailscale/down`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `remove` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `ask_sudo` | `boolean` | No |
+
+</details>
+
+<details id="tailscale-expose">
+<summary><code>tailscale.expose</code> — job / admin</summary>
+
+**POST** `/v1/tailscale/expose`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cluster` | `string` | No |
+| `proxy` | `boolean` | No |
+| `head_host` | `string` | No |
+| `port` | `integer` | No |
+| `set_proxy_host` | `boolean` | No |
+| `ask_sudo` | `boolean` | No |
+
+</details>
+
+<details id="tailscale-join">
+<summary><code>tailscale.join</code> — job / admin</summary>
+
+**POST** `/v1/tailscale/join`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `tag` | `string` | No |
+| `ephemeral` | `boolean` | No |
+| `enable_ssh` | `boolean` | No |
+| `hostname` | `string` | No |
+| `dry_run` | `boolean` | No |
+| `ask_sudo` | `boolean` | No |
+
+</details>
+
+<details id="tailscale-status">
+<summary><code>tailscale.status</code> — job / read</summary>
+
+**POST** `/v1/tailscale/status`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+
+</details>
+
+### workloads
+
+<details id="workloads-endpoints">
+<summary><code>workloads.endpoints</code> — job / read</summary>
+
+**POST** `/v1/workloads/endpoints`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe_revision` | `string` | No |
+| `cluster_candidates` | `string[]` | No |
+| `cluster_id` | `string` | No |
+
+</details>
+
+<details id="workloads-ensure_ready">
+<summary><code>workloads.ensure_ready</code> — job / operate</summary>
+
+**POST** `/v1/workloads/ensure_ready`
+
+**Reservation:** `controller`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `recipe_revision` | `string` | No |
+| `cluster_candidates` | `string[]` | No |
+| `overrides` | `object` | No |
+| `timeout` | `number` | No |
+
+</details>
+
+<details id="workloads-find_intent">
+<summary><code>workloads.find_intent</code> — job / read</summary>
+
+**POST** `/v1/workloads/find_intent`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `intent_id` | `string` | Yes |
+| `hosts` | `string[]` | Yes |
+| `cluster` | `string` | No |
+
+</details>
+
+<details id="workloads-inventory">
+<summary><code>workloads.inventory</code> — job / read</summary>
+
+**POST** `/v1/workloads/inventory`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="workloads-list">
+<summary><code>workloads.list</code> — query / read</summary>
+
+**POST** `/v1/workloads/list`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `limit` | `integer` | No |
+
+</details>
+
+<details id="workloads-materialize">
+<summary><code>workloads.materialize</code> — job / operate</summary>
+
+**POST** `/v1/workloads/materialize`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `strategy_options` | `object` | No |
+| `solo` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `ensure` | `boolean` | No |
+| `scheduler` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `cache_dir` | `string` | No |
+| `offline` | `boolean` | No |
+| `runtime_cache` | `boolean` | No |
+| `auto_port` | `boolean` | No |
+| `ray_port` | `integer` | No |
+| `dashboard_port` | `integer` | No |
+| `dashboard` | `boolean` | No |
+| `init_port` | `integer` | No |
+| `executor` | `string` | No |
+| `executor_config` | `object` | No |
+| `rootful` | `boolean` | No |
+| `cluster_id_override` | `string` | No |
+| `transfer_interface` | `string` | No |
+| `local_cache_dir` | `string` | No |
+| `sync_tuning` | `boolean` | No |
+| `extra_docker_opts` | `string[]` | No |
+| `topology` | `string` | No |
+| `preserve_model_perms` | `boolean` | No |
+| `skip_model_fan_out` | `boolean` | No |
+| `recipe_ref` | `string` | No |
+
+</details>
+
+<details id="workloads-plan">
+<summary><code>workloads.plan</code> — job / read</summary>
+
+**POST** `/v1/workloads/plan`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `strategy_options` | `object` | No |
+| `solo` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `ensure` | `boolean` | No |
+| `scheduler` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `cache_dir` | `string` | No |
+| `offline` | `boolean` | No |
+| `runtime_cache` | `boolean` | No |
+| `auto_port` | `boolean` | No |
+| `ray_port` | `integer` | No |
+| `dashboard_port` | `integer` | No |
+| `dashboard` | `boolean` | No |
+| `init_port` | `integer` | No |
+| `executor` | `string` | No |
+| `executor_config` | `object` | No |
+| `rootful` | `boolean` | No |
+| `cluster_id_override` | `string` | No |
+| `transfer_interface` | `string` | No |
+| `local_cache_dir` | `string` | No |
+| `sync_tuning` | `boolean` | No |
+| `extra_docker_opts` | `string[]` | No |
+| `topology` | `string` | No |
+| `preserve_model_perms` | `boolean` | No |
+| `skip_model_fan_out` | `boolean` | No |
+| `recipe_ref` | `string` | No |
+
+</details>
+
+<details id="workloads-plugins">
+<summary><code>workloads.plugins</code> — job / read</summary>
+
+**POST** `/v1/workloads/plugins`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+No arguments. Send `{}`.
+
+</details>
+
+<details id="workloads-reconcile">
+<summary><code>workloads.reconcile</code> — job / admin</summary>
+
+**POST** `/v1/workloads/reconcile`
+
+**Reservation:** `controller`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `recipe_revision` | `string` | Yes |
+| `cluster_candidates` | `string[]` | No |
+| `overrides` | `object` | No |
+| `cluster_id` | `string` | Yes |
+| `acknowledge_effects` | `boolean` | Yes |
+
+</details>
+
+<details id="workloads-run">
+<summary><code>workloads.run</code> — job / operate</summary>
+
+**POST** `/v1/workloads/run`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+| `strategy_options` | `object` | No |
+| `solo` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `trust` | `boolean` | No |
+| `ensure` | `boolean` | No |
+| `scheduler` | `string` | No |
+| `transfer_mode` | `string` | No |
+| `cache_dir` | `string` | No |
+| `offline` | `boolean` | No |
+| `runtime_cache` | `boolean` | No |
+| `auto_port` | `boolean` | No |
+| `ray_port` | `integer` | No |
+| `dashboard_port` | `integer` | No |
+| `dashboard` | `boolean` | No |
+| `init_port` | `integer` | No |
+| `executor` | `string` | No |
+| `executor_config` | `object` | No |
+| `rootful` | `boolean` | No |
+| `cluster_id_override` | `string` | No |
+| `transfer_interface` | `string` | No |
+| `local_cache_dir` | `string` | No |
+| `sync_tuning` | `boolean` | No |
+| `extra_docker_opts` | `string[]` | No |
+| `topology` | `string` | No |
+| `preserve_model_perms` | `boolean` | No |
+| `skip_model_fan_out` | `boolean` | No |
+| `recipe_ref` | `string` | No |
+| `collect_diagnostics` | `boolean` | No |
+| `confirm` | `boolean` | No |
+| `wait_ready` | `boolean` | No |
+| `post_launch` | `boolean` | No |
+
+</details>
+
+<details id="workloads-sleep">
+<summary><code>workloads.sleep</code> — job / operate</summary>
+
+**POST** `/v1/workloads/sleep`
+
+**Reservation:** `controller`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `recipe_revision` | `string` | Yes |
+| `cluster_candidates` | `string[]` | No |
+| `overrides` | `object` | No |
+| `cluster_id` | `string` | Yes |
+
+</details>
+
+<details id="workloads-status">
+<summary><code>workloads.status</code> — job / read</summary>
+
+**POST** `/v1/workloads/status`
+
+**Reservation:** `none`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `recipe_revision` | `string` | Yes |
+| `cluster_candidates` | `string[]` | No |
+| `overrides` | `object` | No |
+| `cluster_id` | `string` | Yes |
+
+</details>
+
+<details id="workloads-stop">
+<summary><code>workloads.stop</code> — job / operate</summary>
+
+**POST** `/v1/workloads/stop`
+
+**Reservation:** `controller`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `recipe_revision` | `string` | Yes |
+| `cluster_candidates` | `string[]` | No |
+| `overrides` | `object` | No |
+| `cluster_id` | `string` | Yes |
+
+</details>
+
+<details id="workloads-stop_all">
+<summary><code>workloads.stop_all</code> — job / operate</summary>
+
+**POST** `/v1/workloads/stop_all`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `hosts` | `string[]` | Yes |
+| `cluster` | `string` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="workloads-stop_matching">
+<summary><code>workloads.stop_matching</code> — job / operate</summary>
+
+**POST** `/v1/workloads/stop_matching`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `cluster_id` | `string` | No |
+| `recipe` | `string` | No |
+| `hosts` | `string[]` | No |
+| `cluster` | `string` | No |
+| `overrides` | `object` | No |
+
+</details>
+
+<details id="workloads-wake">
+<summary><code>workloads.wake</code> — job / operate</summary>
+
+**POST** `/v1/workloads/wake`
+
+**Reservation:** `controller`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `recipe` | `string` | Yes |
+| `recipe_revision` | `string` | Yes |
+| `cluster_candidates` | `string[]` | No |
+| `overrides` | `object` | No |
+| `cluster_id` | `string` | Yes |
+
+</details>
+
+## Bundled Kubernetes plugin
+
+Requires the loaded `k8s` plugin and the requested capability flags.
+
+### operations
+
+<details id="plugins-k8s-cluster_info">
+<summary><code>plugins.k8s.cluster_info</code> — job / operate</summary>
+
+**POST** `/v1/plugins/k8s/ops/cluster_info`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+| `namespace` | `string` | No |
+| `pin` | `boolean` | No |
+
+</details>
+
+<details id="plugins-k8s-configure_service_account">
+<summary><code>plugins.k8s.configure_service_account</code> — job / admin</summary>
+
+**POST** `/v1/plugins/k8s/ops/configure_service_account`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | No |
+| `namespace` | `string` | No |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+| `create_namespace` | `boolean` | No |
+| `token_duration` | `string` | No |
+| `write_kubeconfig` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="plugins-k8s-ensure_kubectl">
+<summary><code>plugins.k8s.ensure_kubectl</code> — job / admin</summary>
+
+**POST** `/v1/plugins/k8s/ops/ensure_kubectl`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `version` | `string` | No |
+| `context` | `string` | No |
+| `download` | `boolean` | No |
+
+</details>
+
+<details id="plugins-k8s-jobset_status">
+<summary><code>plugins.k8s.jobset_status</code> — job / operate</summary>
+
+**POST** `/v1/plugins/k8s/ops/jobset_status`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+| `namespace` | `string` | No |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+
+</details>
+
+<details id="plugins-k8s-kueue_status">
+<summary><code>plugins.k8s.kueue_status</code> — job / operate</summary>
+
+**POST** `/v1/plugins/k8s/ops/kueue_status`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+
+</details>
+
+<details id="plugins-k8s-list_nodes">
+<summary><code>plugins.k8s.list_nodes</code> — job / operate</summary>
+
+**POST** `/v1/plugins/k8s/ops/list_nodes`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+| `selector` | `string` | No |
+| `gpu_only` | `boolean` | No |
+
+</details>
+
+<details id="plugins-k8s-setup_kueue">
+<summary><code>plugins.k8s.setup_kueue</code> — job / admin</summary>
+
+**POST** `/v1/plugins/k8s/ops/setup_kueue`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `install` | `boolean` | No |
+| `kueue_version` | `string` | No |
+| `jobset_version` | `string` | No |
+| `namespace` | `string` | No |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+| `dry_run` | `boolean` | No |
+
+</details>
+
+<details id="plugins-k8s-stop_jobset">
+<summary><code>plugins.k8s.stop_jobset</code> — job / operate</summary>
+
+**POST** `/v1/plugins/k8s/ops/stop_jobset`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `name` | `string` | Yes |
+| `namespace` | `string` | No |
+| `kubeconfig` | `string` | No |
+| `context` | `string` | No |
+
+</details>
+
+{/* END DAEMON OPERATION REFERENCE */}
+
+## Results and errors
+
+| Family | Final result / meaning |
+| --- | --- |
+| Catalog | Bounded recipe listings/facets, registry or cluster arrays, recipe details with stable `source_kind`, normalized overrides, revision, plugin items and issues; refresh/capacity/import mutations have their own schemas. |
+| Planning/execution | Explicit Plan/Run/Build/Benchmark DTOs. Workload `cluster_id` is distinct from the daemon `job_id`. A serialized plan is a preview, not a resumable execution handle. |
+| Generic workloads | `ensure_ready`: ready state, exact workload ID, credential-free endpoint, original observation timestamp, adoption flag and shared workload row. Guarded stop: offline state/IDs; selector/all teardown retain their separate Stop/StopAll DTOs. Inventory: recorded state/providers/actions. Control: the same workload row after provider observation/action. Reconcile: ID/state/receipt count. |
+| Discovery | `discovery.snapshot` and `workloads.endpoints`: sweep ID/time, live/metadata mode, hosts/coverage/errors/completeness, safe endpoints. A partial or metadata-only sweep is not authoritative absence. |
+| Proxy | State/models/start/stop/sync/alias/service DTOs; status includes discovery owner/backend/job/scope/health. `proxy.discovery.ensure` returns an existing/new watch job ID, not that watch's result. |
+| Setup/network/cache/Kubernetes | Operation-specific result schemas; some are maps/arrays or booleans, not a universal envelope. Check `/v1/ops` rather than guessing from operation name. |
+
+Query results and successful job results do not have the same HTTP envelope.
+Transport errors use `detail` and usually a typed `error` record; job failures are
+stored in the job's `error`. Terminal job states are `succeeded`, `failed`,
+`cancelled`, `lost`; nonterminal states are `queued`, `starting`, `running`,
+`waiting_input`, `cancelling`. Lost/uncertain effects require reconciliation;
+`retryable` does not mean that replaying a mutation with a fresh key is safe.
+
+
+Common HTTP failures include:
+
+| Status | Meaning |
+| --- | --- |
+| 401 | Missing, expired, or invalid authentication |
+| 403 | Insufficient permission, disabled feature, or rejected trust |
+| 404 | Unknown operation, resource, or snapshot selector |
+| 408 / 413 | Request-body timeout / configured body limit exceeded |
+| 409 | Conflicting retry key, resource/capacity conflict, or admission/maintenance conflict |
+| 410 | Requested event history is no longer retained |
+| 422 | Invalid JSON object, unknown field, or schema/type violation |
+| 502 / 504 | Hosts unreachable / operation timeout |
+| 500 | Unexpected failure; inspect private daemon diagnostics |
+
+Transport errors include `detail` and usually an `error` object with `type`,
+`retryable`, and `attrs`. Authentication and permission errors may contain only
+`detail`; clients must not assume a uniform error envelope. A job accepted with
+202 can later fail, with that failure recorded in the job's `error`.
+
+## Extending the API
+
+Plugins register framework-free `DaemonOp` declarations through `sparkrun.plugins`.
+The loader binds ownership before importing the module, covering both top-level
+registration and `register(v)`. Declare a local name, request/result schemas,
+execution kind, permission, feature gate, and reservation policy. Handlers receive
+decoded arguments, an operation-local context, and a prompt callback.
+
+For a plugin whose loader-assigned ID is `example`:
+
+```python
+from sparkrun.plugins import DaemonOp, register_plugin_daemon_op
+
+SPARKRUN_PLUGIN_API_VERSION = 1
+
+
+def load_status():
+    from .handlers import status
+    return status
+
+
+def register(v):
+    register_plugin_daemon_op(DaemonOp(
+        name="status",
+        handler_loader=load_status,
+        kind="query",
+        scope="read",
+        request_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        result_schema={
+            "type": "object",
+            "properties": {"ready": {"type": "boolean"}},
+            "required": ["ready"],
+            "additionalProperties": False,
+        },
+        description="Report readiness without changing state.",
+    ))
+```
+
+This registers `plugins.example.status`, with alias
+`POST /v1/plugins/example/ops/status`. The lazy `.handlers.status` function must
+provide the declared result. Keep FastAPI, Pydantic, and uvicorn imports out of
+scanned registration modules. See [Plugin Development](/developer-reference/plugin-development/)
+for loading and packaging.
+
+Local names use lowercase identifier segments separated by dots:
+`workloads.activate` becomes `plugins.<plugin-id>.workloads.activate` and
+`/v1/plugins/<plugin-id>/ops/workloads/activate`. Two plugins can declare the same
+local name. `plugins` is reserved as a local root. Streams use dedicated endpoints
+and report `http_path: null`.
+
+The stable ID comes from the managed manifest, installed entry point, or
+bundled/directory discovery identity. ASCII case and runs of `_`, `.`, and `-`
+normalize to lowercase hyphens: `oci_relay` becomes `oci-relay`. IDs start with a
+letter, end with a letter/digit, and accept at most 100 input characters. Paths,
+traversal-like names, `core`, and `plugins` are rejected. Versions/generations are
+excluded. Duplicate selected IDs fail before import; existing store paths and
+configuration keys retain their names. `sparkrun plugins list --json` exposes
+`plugin_id`.
+
+An explicit declaration `owner` must match the loader's identity. Registration
+outside a loader context fails. Embedded applications can use the public
+`application_daemon_registration()` context, which assigns
+`app-<application-profile-id>`. Conflicting declarations are rejected and failed
+imports/hooks roll back registrations. These rules do not sandbox trusted plugin code.
+
+### Schema vocabulary
+
+Plugin request and result schemas are validated at registration. Supported
+validation keywords are `type` (including a list of types), `properties`,
+`required`, boolean/schema `additionalProperties`, schema `items`, `anyOf`,
+`enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`,
+and Python-regex `pattern`. Sibling constraints still apply alongside `anyOf`.
+Annotations `title`, `description`, `default`, `examples`, `deprecated`, `readOnly`,
+`writeOnly`, and `$comment` are accepted without changing validation. Unsupported
+keywords such as `$ref`, `const`, `oneOf`, `allOf`, and `format` are rejected;
+use inline supported schemas and a one-value `enum` for constants.
+
+### Plugin JSON adapters
+
+Adapters decode a bounded JSON envelope into a declared operation and arguments.
+A plugin identified as `example` can register relative path `compat/status`:
+
+```python
+from sparkrun.plugins import DaemonRoute, register_plugin_daemon_route
+
+
+def load_decoder():
+    return lambda envelope: ("status", {})
+
+
+def register_adapter():  # Call from register(v), after declaring status.
+    register_plugin_daemon_route(DaemonRoute(
+        path="compat/status",
+        decode_loader=load_decoder,
+        operations=("status",),
+        request_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    ))
+```
+
+Its URL is `POST /v1/plugins/example/routes/compat/status`. Local target names
+resolve within the plugin. Use `core:cluster.create` for an explicit core target
+or `plugins.other.status` for another plugin. The selected target still enforces
+its schema, permissions, feature gate, secret/trust policy, and job behavior.
+The decoder must return one of its declared target spellings.
+
+Paths must be literal and relative: no traversal, parameters, wildcards, encoded
+separators, queries, or fragments. Adapters cannot mount arbitrary ASGI handlers.
+Targets must exist at startup and path collisions fail startup. The separate
+`routes/` branch cannot shadow generated `ops/` aliases. Changing declarations
+requires a daemon restart. The bundled operations documented here currently
+register no custom adapters.
+
+### Plugin feedback
+
+LiL, OCI Relay, and Sparkarena contribute effects through enclosing operations
+without independent daemon endpoints.
+
+[Structured Feedback](/developer-reference/feedback/) appears in job SSE as
+versioned `type: "feedback"` events, with a top-level `message` and activity,
+stage, host, counter, and metric fields. Operation-scoped legacy `type: "log"`
+messages also carry `message`. These events describe operation progress, such as
+image transfer or restore; container output uses the log stream.
+
+The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/DAEMON_API.md)
+contains the corresponding operation inventory. The running daemon's discovery and
+OpenAPI schemas remain authoritative for its installed versions and plugins.

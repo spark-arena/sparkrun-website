@@ -22,7 +22,7 @@ const features = [
   {
     icon: '📊',
     title: 'VRAM Estimation',
-    description: 'Auto-detects model architecture from HuggingFace. Know whether your config fits on a single DGX Spark or how many you need before launching.',
+    description: 'Estimate model weights and cache demand before launching. Unknown or lower-bound estimates need validation against your hardware and runtime.',
   },
   {
     icon: '🔄',

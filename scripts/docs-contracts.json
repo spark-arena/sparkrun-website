@@ -1,0 +1,93 @@
+{
+  "repository": "https://github.com/spark-arena/sparkrun.git",
+  "revision": "cf5e16b9a44079288fd0a712e240d250a3f69b07",
+  "version": "0.4.0",
+  "status": "release-preparation",
+  "python": "3.12",
+  "excluded_python_fences": {},
+  "excluded_cli_examples": {},
+  "feature_defaults": {
+    "executor.docker": [
+      true,
+      true,
+      true
+    ],
+    "gateway.litellm": [
+      true,
+      true,
+      true
+    ],
+    "builder.uv_venv": [
+      false,
+      true,
+      true
+    ],
+    "cli.setup.features": [
+      false,
+      true,
+      true
+    ],
+    "daemon": [
+      false,
+      false,
+      true
+    ],
+    "cli.setup.rdma_test": [
+      true,
+      true,
+      true
+    ],
+    "cli.setup.rdma_test.nccl": [
+      false,
+      false,
+      true
+    ],
+    "gateway.sparkroute": [
+      false,
+      false,
+      false
+    ],
+    "executor.local": [
+      false,
+      false,
+      false
+    ],
+    "core.external_plugins": [
+      false,
+      false,
+      false
+    ],
+    "gateway": [
+      true,
+      true,
+      true
+    ]
+  },
+  "plugin_defaults": {
+    "litellm": [
+      true,
+      true,
+      true
+    ],
+    "sparkarena": [
+      true,
+      true,
+      true
+    ],
+    "oci-relay": [
+      true,
+      true,
+      true
+    ],
+    "k8s": [
+      false,
+      false,
+      true
+    ],
+    "lil": [
+      false,
+      false,
+      true
+    ]
+  }
+}

@@ -188,7 +188,7 @@ You must reconnect the SSH session after changing groups (or log out and back in
 - `sparkrun setup check` reports **FAIL** on `NVIDIA CDI spec (/etc/cdi/nvidia.yaml)` with `/etc/cdi/nvidia.yaml missing or empty`, or **WARN** with `N of M referenced paths missing — spec looks stale`
 - A failed launch prints the fix directly: sparkrun recognizes CDI-shaped Docker errors and appends the command to run
 
-Since 0.3.0 sparkrun requests GPUs through **CDI**, emitting `--device nvidia.com/gpu=all` rather than `--gpus`, so a host without a generated CDI spec cannot hand a GPU to the container. CDI is the portable path: it also works on hosts whose Docker rejects `--gpus` outright. It requires **Docker 25 or newer** — on an older daemon the flag is not understood, which produces the same "no GPU" symptom for a different reason.
+First check the resolved executor GPU mode. **DGX Spark Docker defaults to `gpu_access_mode: gpus`**. For that mode, diagnose Docker and NVIDIA Container Toolkit access; generating a CDI spec is not a universal fix. The CDI-specific steps below apply only when `gpu_access_mode: cdi` is selected/required and Docker emits `--device nvidia.com/gpu=all`. Confirm that the target Docker/toolkit supports that mode.
 
 **Check first:**
 
@@ -196,7 +196,7 @@ Since 0.3.0 sparkrun requests GPUs through **CDI**, emitting `--device nvidia.co
 sparkrun setup check --cluster mylab
 ```
 
-This probes every host without changing anything and tells you which ones are missing the spec.
+This probes each host without changing anything. CDI findings apply only to a plan that requires CDI; other GPU modes have their own access checks.
 
 **Fix** — on each affected host:
 
@@ -210,7 +210,7 @@ Verify the devices are now registered:
 nvidia-ctk cdi list          # expect nvidia.com/gpu=... entries
 ```
 
-`sparkrun setup wizard` performs this as its **NVIDIA CDI** step, so a host set up through the wizard already has it. Run the command manually when you added a host later, or provisioned one outside the wizard.
+`sparkrun setup wizard` offers this **NVIDIA CDI** step when the resolved plan requires it. Run the command manually when you added a host later, or provisioned one outside the wizard.
 
 :::note[Prerequisite]
 `nvidia-ctk` ships with the **NVIDIA Container Toolkit**. If it isn't installed, `sparkrun setup check` reports the CDI item as `SKIP — requires nvidia-ctk` and fails the `NVIDIA Container Toolkit` check above it; install the toolkit first, then generate the spec.
@@ -378,3 +378,38 @@ sparkrun -vvv run my-recipe
 ```
 See [CLI Overview — Verbosity levels](/cli/overview/#verbosity-levels) for all options.
 :::
+## Incomplete model copies or offline launch failures
+
+Inspect saved inventory and actual target files with [model-cache](/cli/model-cache/).
+Targeted repair can replace missing/damaged snapshot entries and broken HF
+shared-blob links. A saved manifest is expected inventory, not evidence that a
+previous transfer completed. Address permission errors under the workload's
+identity; avoid deleting the entire cache. Offline mode cannot fetch missing
+weights, metadata, images, or tools.
+
+## Model-cache cleanup does not meet its target
+
+Use `sparkrun model-cache list` to inspect pins, workload claims, tracked status,
+and each revision's protection reason. Shared HF blobs are never deleted, so
+removing a symlink-based snapshot may free no model-weight bytes. `--max-bytes`
+counts private tracked allocations; `--min-free-bytes` measures the whole cache
+filesystem. Inspect `target_met` in the report.
+
+Unknown content, busy caches, and active claims remain protected. Retry normal
+stop for a known workload; release an orphaned claim only after checking every
+host it names. See [Model Cache Management](/advanced/cache-management/#preview-and-apply-lru-cleanup)
+for eligibility, byte targets, and reconciliation.
+
+## Readiness timeout after launch
+
+A detached workload can still be running after a failed readiness wait. Inspect
+`sparkrun status` and `sparkrun logs` before deciding to stop or retry. Use
+`--no-follow` to suppress logs while retaining the wait; `--no-ready-wait` explicitly
+skips it and makes no inference-readiness claim. See [run](/cli/run/).
+
+## Duplicate identities after cloning hosts
+
+Run `setup check --cluster mylab --json` for a read-only audit. Follow the
+[SSH identity rotation and recovery guide](/getting-started/ssh-setup/#ssh-host-identity-audit-and-rotation)
+for confirmed per-host remediation. Do not bypass verification to silence a
+host-key mismatch; interrupted rotation has authenticated recovery records.

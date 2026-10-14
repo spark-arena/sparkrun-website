@@ -34,7 +34,7 @@ export default function HeroVideo() {
       <div className="hero-video-background not-content"></div>
       <div className="hero-terminal-container not-content">
         <div className="terminal-header">
-          <span className="terminal-title">sparkrun</span>
+          <span className="terminal-title">sparkrun · earlier-release demo</span>
         </div>
         <div className="hero-video-wrapper">
           <div ref={playerRef} className="hero-asciinema" />

@@ -1,0 +1,134 @@
+---
+title: What's New in 0.4.0
+description: OCI Relay image distribution, managed plugins, readiness-aware launches, an optional daemon, and API changes in sparkrun 0.4.0.
+---
+
+sparkrun 0.4.0 brings OCI Relay image distribution, managed plugin installation,
+an optional daemon, and more visibility into startup, model caches, and benchmarks. It also changes the Python
+and plugin APIs.
+
+## Startup waits for readiness
+
+By default, `sparkrun run` follows startup logs and returns once the model is ready
+and required hooks finish. Use `--no-follow` to wait quietly, `--follow` to keep
+watching after readiness, or `--no-ready-wait` to return after launch checks.
+Startup timing reports show the observations supported by the runtime and executor.
+
+A failed readiness check or Ctrl+C can leave the detached workload running.
+See [run](/cli/run/#readiness-and-exit-status) for lifecycle and exit behavior.
+
+## Managed plugins
+
+The new `sparkrun plugins` commands install trusted Git sources, inspect
+compatibility, update plugins, and roll back to a retained generation. Core
+updates also reconcile compatible managed plugins; `--no-update-plugins` skips
+fetching updates while retaining the local compatibility audit.
+
+`plugins enable` and `plugins disable` now control loading across bundled,
+managed, manual, and installed plugins, independently of capability flags.
+Inventory distinguishes loading state, compatibility, and declared features.
+Explicitly enabling a gateway capability selects its provider. Plugin authors can
+use static manifests and lifecycle hooks to plan settings for management actions.
+
+See [Managed Plugins](/advanced/plugins/) for controls, updates, and rollback, and
+[Plugin Development](/developer-reference/plugin-development/) for manifests and
+extension examples.
+
+## Container image distribution with OCI Relay
+
+0.4.0 includes [OCI Relay](https://github.com/spark-arena/oci-relay), enabled by
+default on every release channel. Run recipes normally: sparkrun sets up the
+relay and coordinates image delivery to Linux Docker hosts automatically.
+
+- **Stream images directly from registries or a local Docker store.** Registry
+  transfers can reach receivers without first importing the image on the source.
+- **Reuse compatible layers already on each host**, including across classic
+  Docker and containerd image stores, reducing repeated data transfers.
+- **Use parallel transfers with bounded resource usage.** The relay supports
+  multiple network paths and parallel downloads of large registry blobs.
+- **See transfer and verification progress per host.** Rates, cache reuse, and
+  verified outcomes are available through CLI output and structured events for
+  applications and daemon clients.
+
+sparkrun downloads and verifies the required relay binaries, then stages them to
+execution hosts; those hosts do not need internet access for relay installation.
+Cached binaries and resident source images can support offline distribution.
+See [Model Cache Management](/advanced/cache-management/) for transfer validation and
+offline behavior.
+
+## Shared diagnostics and workload logs
+
+CLI, Python, and daemon operations share opt-in, bounded diagnostic bundles.
+Capture includes operation-attributed DEBUG logs independently of console verbosity,
+feedback, and plugin-owned snapshots with shared redaction. Benchmark captures save
+workload log tails before cleanup, preserving evidence for later finalization
+failures. Daemon jobs expose authenticated bundle downloads.
+
+Applications can resolve reusable log targets, follow output, page older history,
+and cancel readers. Native Kubernetes logs share the same source-aware API;
+transport errors stay separate from workload output. See
+[Diagnostics](/getting-started/diagnostics/), [Diagnostics API](/developer-reference/diagnostics-api/),
+and [Logging API](/developer-reference/logging-api/).
+
+## Hardware-aware setup and SSH identity checks
+
+Setup now uses shared hardware and executor plans. On DGX Spark, Docker defaults
+to `gpu_access_mode: gpus`; CDI setup applies when selected or required.
+Read-only checks can report duplicate SSH server host keys and machine IDs.
+A separate, explicitly confirmed rotation workflow handles remediation.
+
+DGX Spark's scheduling cap is now 0.90. The default vLLM/SGLang serving utilization
+is 0.80 when the recipe and overrides leave it unset. These settings serve different
+purposes; explicit recipe memory settings still take precedence for the engine.
+See the [Setup Wizard](/getting-started/setup-wizard/),
+[SSH Setup](/getting-started/ssh-setup/), and [Schedulers](/advanced/schedulers/).
+
+## Optional daemon
+
+Applications can use an authenticated HTTP API with durable jobs, structured
+events, prompts, and cancellation. Domain-based operations and convenient HTTP
+paths cover workload lifecycle, catalog, cluster, setup, and benchmark actions.
+Plugins receive their own API namespaces. Gateway discovery and workload recovery
+share core ownership and lifecycle controls, with dedicated service-job capacity.
+
+The daemon is enabled by default on alpha and opt-in on stable/beta; ordinary CLI
+commands still run directly.
+See [Daemon Mode](/advanced/daemon/) for connections, job lifecycle, and
+platform support, and [Daemon API](/developer-reference/daemon-api/) for the reference.
+
+## Cache validation and benchmark progress
+
+Model manifests record expected files at an immutable revision. New cache commands
+inspect inventory, resolve metadata, import manifests, and repair damaged or
+missing files. Metadata and checksum validation are available alongside the legacy
+default. Cache-local usage records now track model preparation and workload use.
+You can list usage, pin revisions, and preview LRU cleanup before applying it.
+Optional automatic cleanup is off by default and preserves pins, workload claims,
+and unknown content. Parallel model copies have configurable per-host and total
+stream limits. Runtime compilation caches have separate reuse and cleanup controls.
+See [Model Cache Management](/advanced/cache-management/).
+
+Tool benchmarks now show scenario verdicts and progress with tool-eval-bench
+v2.8.0. Resume remains suite-level, and unknown totals are reported without an
+invented percentage. Measurement results are retained when export or publication
+fails, so finalization can be retried without repeating measurements.
+See [Benchmarking Models](/tutorials/benchmarking/) and
+[Benchmark API](/developer-reference/benchmark-api/).
+
+## Breaking Python and plugin API changes
+
+- Initialize applications with `sparkrun.application.initialize` and reuse the
+  returned context. Frontends own confirmation, rendering, and readiness policy;
+  detached API launches do not inherit CLI log-following and wait behavior.
+- Put runtime settings such as port in `RunOptions.overrides`. Benchmark
+  integrations use `BenchmarkOptions.integrations`, with public progress and
+  decision callbacks.
+- Plugins declare `SPARKRUN_PLUGIN_API_VERSION = 1`. Installed integrations use
+  the shared `sparkrun.plugins` entry-point group and explicit selection.
+- Builders implement `prepare(..., builder_context=None)` in place of the old
+  image-preparation hook. Arena and Kubernetes Python modules moved under
+  `sparkrun.plugins`.
+
+See [Python API](/developer-reference/python-api/),
+[Plugin Development](/developer-reference/plugin-development/), and
+[Builders](/developer-reference/builders/) for the updated contracts.

@@ -27,7 +27,7 @@ sparkrun run qwen3-1.7b-vllm
 sparkrun run qwen3-1.7b-vllm --hosts 10.24.11.13
 ```
 
-sparkrun launches containers in the background and follows logs. **Ctrl+C detaches from logs — it never kills your inference job.** Your model keeps serving.
+sparkrun launches detached containers, follows startup logs, and returns after readiness and required hooks. Use `--no-follow` to wait quietly, `--follow` to keep watching after readiness, or `--no-ready-wait` for launch-only completion. **Ctrl+C detaches the observers and leaves the detached workload running.** See [run](/cli/run/#readiness-and-exit-status).
 
 ## Run multi-node (tensor parallelism)
 
@@ -45,9 +45,11 @@ Each DGX Spark has one GPU with 128 GB unified memory, so `--tp 2` splits the mo
 sparkrun show nemotron3-nano-30b-nvfp4-vllm
 ```
 
-This displays recipe details including a VRAM estimation that tells you whether the model fits in memory before you launch.
+This displays recipe details and a memory estimate. Unknown or lower-bound estimates do not establish fit; account for runtime allocation, KV cache, and observed host capacity. See [Memory-aware fit](/advanced/schedulers/#memory-aware-fit).
 
 ## Status, logs, and stop
+
+The following output is illustrative; job IDs, addresses, images, and durations vary.
 
 ```bash
 # Check what's running

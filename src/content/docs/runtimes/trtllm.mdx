@@ -119,3 +119,14 @@ See [Execution Flow](/developer-reference/execution-flow/) for the full MPI orch
 ## Auto-detection
 
 sparkrun auto-detects TRT-LLM recipes by checking the command template. If the command starts with `trtllm-serve` or `mpirun...trtllm`, the `trtllm` runtime is selected automatically.
+
+## Startup and cache policy
+
+TensorRT-LLM does not declare streaming inference readiness observers. Default
+`run` uses supported endpoint checks and waits for required hooks, without
+reporting unavailable inference timings. See [run](/cli/run/).
+
+Memory values in these recipes are explicit engine settings, separate from
+[scheduling reservations](/advanced/schedulers/). Runtime compilation/autotuning
+cache reuse is also separate from model-file validation; see
+[Model Cache Management](/advanced/cache-management/) before pruning either cache.

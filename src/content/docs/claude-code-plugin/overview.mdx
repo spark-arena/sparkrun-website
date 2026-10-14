@@ -61,4 +61,5 @@ Just describe what you want — Claude uses the skills automatically:
 - **Runtimes** are inference engines: vLLM, SGLang, llama.cpp
 - **Clusters** are named groups of DGX Spark hosts
 - Each DGX Spark has 1 GPU, so `--tp N` (tensor parallelism) = N hosts
-- sparkrun launches detached containers — Ctrl+C detaches from logs, never kills the job
+- Default launches return after readiness; `--follow` continues observing and Ctrl+C detaches from detached workloads
+- Benchmark, monitor, and proxy slash commands are also available; see [Plugin Commands](/claude-code-plugin/commands/)

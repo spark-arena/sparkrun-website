@@ -1,28 +1,208 @@
 ---
-title: External Plugins
-description: Loading out-of-tree runtimes, executors, and transports.
+title: Managed Plugins
+description: Install, enable, disable, inspect, update, and develop Sparkrun plugins.
 ---
 
-sparkrun's extension points — runtimes, builders, benchmarking frameworks,
-executors, schedulers, transports — are discovered from the installed package.
-Out-of-tree plugins let you add your own without forking sparkrun or shipping
-them to PyPI.
+Sparkrun has bundled plugins, managed Git snapshots, manual plugin directories,
+and explicitly selected installed Python integrations. Use managed plugins for
+SparkRoute and ColdSnap; OCI Relay remains bundled. A plugin's API declaration,
+its release version, and its Sparkrun compatibility range are separate checks.
 
-:::caution[Off by default, and trusted when on]
-Loading external plugins executes user-supplied Python at startup, so it is
-gated behind the `core.external_plugins` [feature flag](/advanced/feature-flags/)
-and off on every channel. When enabled, plugin directories are **trusted by
-definition** — the same model as a pip-installed package. Only point it at
-code you control.
-:::
+## Install and manage external plugins
 
-## Enabling
-
-```bash
-sparkrun setup features enable core.external_plugins
+```sh
+sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin
+sparkrun plugins add https://github.com/sparksq/sparkrun-coldsnap-plugin --enable
+sparkrun plugins list
+sparkrun plugins list --json
+sparkrun plugins update sparkroute
+sparkrun plugins update --all
+sparkrun plugins rollback sparkroute
+sparkrun plugins remove sparkroute
 ```
 
-Then list the directories to load in `~/.config/sparkrun/config.yaml`:
+`plugins` alone lists plugins. The hidden `setup plugins` alias remains available
+with identical subcommands. Management commands inspect metadata without loading
+plugins, so they can repair an installation whose plugin fails at import. Use
+`list --check` to additionally check managed plugins in a bounded child process.
+The state column reports whether the plugin is permitted to load (`enabled` or `disabled`).
+Compatibility is checked on every listing; it does not imply a successful load.
+
+`add` asks you to trust the supplied source before executing its code. Plugins
+run with your permissions. This grants standing consent to future compatible
+updates from that source, including updates during `sparkrun update`. Use
+`--trust` for explicit noninteractive consent. A general `--yes` is not a trust
+grant. Changes to the source's declared module, distribution, package path,
+repository, or capability require renewed consent.
+
+Adding a plugin enables `core.external_plugins` if needed. If that would also
+activate existing `plugins.paths`, their activation needs separate confirmation;
+noninteractive users must review and enable those paths beforehand. The plugin's
+loading state follows its existing policy unless you pass `--enable`, which
+explicitly enables the plugin. Capability flags retain their configured/default
+values. Unknown flags default off. Environment feature overrides and
+`SPARKRUN_NO_EXTERNAL_PLUGINS` still take precedence. Installing ColdSnap does
+not trust the recipe registries it declares; use the separate registry trust flow.
+
+Git sources default to `main`, resolved once to an immutable commit. Select a
+branch, tag, or full commit with `--ref`:
+
+```sh
+sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --ref main
+sparkrun plugins update sparkroute --ref refs/tags/v0.2.1
+sparkrun plugins add https://github.com/sparksq/sparkrun-coldsnap-plugin --dry-run
+```
+
+Branches track new commits even when the plugin's version string is unchanged.
+Tags and commits are pinned. Explicit updates detect moved tags and refuse them;
+automatic updates leave pins alone. Ambiguous tag/branch names require a fully
+qualified ref. Select managed plugins by their stable name or an unambiguous
+saved source URL. Removing needs confirmation (`--yes` for automation). Dry runs
+may fetch metadata but do not trust, execute, activate, or prune plugins.
+
+This release supports Git source snapshots. Wheel/PyPI acquisition is a separate
+planned phase. Git installs read existing `plugin.toml` and `pyproject.toml` as
+data: no custom registry definition and no build backend execution. They require
+static project metadata, a pure Python package with a literal
+`SPARKRUN_PLUGIN_API_VERSION`, explicit Python and Sparkrun ranges, and dependencies
+already satisfied by the host. Both top-level packages and
+`sparkrun.plugins.<package>` layouts are supported. Symlinks, submodules, compiled
+payloads, conflicting providers, and unsupported layouts are rejected. Package
+resources and declared license files are preserved.
+
+## Enable or disable plugin loading
+
+Loading a plugin and enabling one of its capabilities are separate actions:
+
+```bash
+sparkrun plugins enable sparkroute
+sparkrun setup features enable gateway.sparkroute
+sparkrun plugins disable oci-relay --dry-run
+sparkrun plugins disable oci-relay
+```
+
+`plugins enable` and `plugins disable` work across bundled, managed, manual, and
+installed plugins. Enabling permits registration and runs the plugin's enable
+hook; it preserves capability choices. Disabling prevents the plugin's imports,
+commands, and registrations in new processes, while retaining its installation,
+settings, and gateway selection. It does not stop services. Restart long-running
+consumers after changing loading policy. Required application plugins cannot be
+disabled through these commands.
+
+The commands write canonical plugin IDs under `plugins.enabled`:
+
+```yaml
+plugins:
+  enabled:
+    sparkroute: true
+    oci-relay: false
+features:
+  gateway: true
+  gateway.sparkroute: true
+```
+
+Explicit plugin overrides take precedence over legacy `integrations` settings,
+application-profile selection, and old whole-plugin flags such as
+`plugins.oci_relay` or `integration.k8s`. Existing settings remain readable as
+fallbacks. External plugins still require `core.external_plugins`, and loader
+environment opt-outs still apply. A disabled plugin blocks its capabilities even
+if their flags are on.
+
+Explicitly enabling a gateway capability selects that provider in `proxy.yaml`.
+For example, `setup features enable gateway.sparkroute` selects SparkRoute,
+including when that flag was already on. Enabling its plugin alone does not
+select it, and a feature command does not enable a disabled parent plugin.
+Other gateway capabilities stay enabled. An unavailable selected provider raises
+an error; there is no silent fallback. Resetting a feature restores its default
+without running an enable hook or selecting a gateway.
+
+## Updating Sparkrun and compatibility
+
+Both `sparkrun update` and `sparkrun setup update` check every plugin's declared
+compatibility, including disabled and unmanaged plugins. By default they update
+trusted managed plugins to compatible revisions within their saved source/ref
+policy, including repairs for plugins made incompatible by the new core.
+
+```sh
+sparkrun update                      # core, compatible managed plugins, registries
+sparkrun update --no-update-plugins   # local plugin audit only; no plugin fetch/write
+sparkrun setup update --no-update-plugins --no-update-registries
+```
+
+A fresh process checks the resulting core, Python, plugin/profile APIs, and
+installed dependency constraints. Incompatible or unknown candidates and failed
+load tests leave the active plugin intact. Other plugin updates continue after a
+failure. Core-update warnings are nonfatal; an explicit `plugins update` reports
+failure with a nonzero exit status. Unmanaged plugins are audited but never
+modified. Failed core installs or unverifiable resulting identities permit only
+an audit, not repairs. An older core without the reconciliation helper reports
+that the audit is incomplete.
+
+Updates and rollback preserve plugin loading and capability choices. Updating a
+disabled plugin does not enable it. Lifecycle hooks can plan configuration changes
+for explicit actions; startup, inventory, validation, and dry runs never run them.
+See [lifecycle hooks](/developer-reference/plugin-development/#static-manifests-and-lifecycle-hooks)
+for events, failure handling, and the plugin author contract.
+
+The same compatibility evaluator is used by add, update, rollback, list, and core
+updates. Ordinary startup performs no new version-range/dependency audit or
+network update. Existing feature, plugin API, and application-profile guards
+still apply. Missing declarations are reported as unknown rather than assumed
+compatible. The opt-out does not check whether an update is available.
+
+## Storage and rollback
+
+Managed plugins live beside the active config file, outside Sparkrun's Python
+environment, under `plugins/<name>/<generation>/`. `plugins.yaml` records source
+trust, the exact revision, active generation, and ordered previous generations.
+Changing or reinstalling Sparkrun does not replace these files. Alternate config
+roots keep separate plugin stores.
+
+By default each plugin keeps two generations: current and previous. Configure a
+positive integer in `config.yaml` to change the total retained count:
+
+```yaml
+plugins:
+  retain_generations: 2
+```
+
+`1` disables rollback history. Larger values retain the most recently active
+distinct generations. Updates prune only after activation succeeds. Rollback
+validates the previous payload and swaps it with current without copying; the
+saved source/ref stays unchanged, so a later update may advance it again. Use
+`update --ref` to pin an older revision.
+
+Lowering the limit takes effect across the store at the next successful mutation,
+including a no-op update. Listing, dry runs, startup, and `--no-update-plugins`
+never prune. An interrupted activation is recovered by the next mutating command.
+If deletion fails after commit, the update reports cleanup pending and blocks
+further installation until cleanup succeeds. `remove` deletes manager-owned
+payloads and history even when a plugin cannot load, while preserving capability
+flags, runtime data, and user recipe-registry settings. Long-running plugin
+consumers should be restarted after replacement, rollback, removal, or pruning;
+retained history does not indefinitely preserve files for running processes.
+
+
+## Reading inventory
+
+`plugins list` inspects metadata without importing plugin code. The effective
+loading state, actual loaded state, compatibility result, and optional load check
+are separate facts. Missing declarations are **unknown**, not compatible; unknown
+versions are JSON `null`. Read the diagnostics following the table. `--check`
+executes trusted managed plugins in a child process with a 60-second timeout,
+including disabled ones; it is not a metadata-only inspection.
+
+The table's `FEATURES` column lists declared capability flags, including those of
+disabled plugins. It does not report whether those capabilities are enabled.
+`none` means there are no separate flags; `unavailable` means declarations could
+not be read. Use `setup features list` for effective capability state and its
+`OWNER` column. JSON inventory also includes `features`, `state_source`,
+`blocked_reason`, and `selected_gateway`.
+
+## Manual directories for development
+
+For code you control, explicitly enable the external plugin gate and configure
+paths beside your application config:
 
 ```yaml
 plugins:
@@ -30,50 +210,23 @@ plugins:
     - ~/src/my-sparkrun-plugins
 ```
 
-With the flag off, sparkrun does not even read `plugins.paths`.
-
-## What gets loaded
-
-Each configured directory is prepended to `sys.path`. Every importable
-top-level module or package inside it is imported, then:
-
-1. Scanned for subclasses of the sparkrun plugin base types — `RuntimePlugin`,
-   `BuilderPlugin`, `BenchmarkingPlugin`, `Executor`, `Scheduler`,
-   `Transport` — which are registered automatically.
-2. Given the chance to self-register anything else via an optional
-   module-level `register(v)` hook. This is the escape hatch for registries
-   that aren't subclass-discovered, such as hardware platforms.
-
-A plugin that fails to import is logged and skipped — a broken plugin never
-breaks startup.
-
-## Adding CLI commands
-
-A plugin can attach its own Click commands to the sparkrun command tree:
-
-```python
-from sparkrun.cli.ext import register_cli_command
-
-register_cli_command(my_command, parent=("cluster", "import"))
+```bash
+sparkrun setup features enable core.external_plugins
 ```
 
-`parent=()` attaches at the top level. Attachment is idempotent and never
-replaces a built-in command, so plugin commands appear in `--help` and dispatch
-like native ones.
+Modules in these directories execute with your permissions at startup and must
+declare `SPARKRUN_PLUGIN_API_VERSION = 1`. Supported registration failures roll
+back enlisted contributions and remain visible in inventory; arbitrary plugin I/O
+cannot be undone. Required integration failures and provider conflicts can block
+launches. A failed optional import is not proof that every startup can continue.
 
-## Gating your own plugin
+Installed Python integrations are a different mechanism: installation supplies
+metadata, but their stable IDs must be selected before initialization through
+`plugins enable`, `plugins.enabled`, or the application profile.
+See [Plugin Development](/developer-reference/plugin-development/) for entry
+points, plugin-owned registries, CLI commands and options, recipe extensions,
+setup steps, execution providers, benchmarks, and daemon integration examples.
 
-Plugins can declare a feature flag and register it, so users opt in explicitly:
-
-```python
-class MyExecutor(Executor):
-    executor_name = "mine"
-    required_feature_flag = "executor.mine"
-```
-
-A gated plugin stays registered but is invisible to resolution and
-tab-completion until its flag is enabled.
-
-Commands and backends contributed by a plugin are not part of a stock sparkrun
-install, so they are not documented here — consult the plugin's own
-documentation.
+See [plugins CLI](/cli/plugins/) for flags and [Updates](/getting-started/updates/)
+for core upgrades. Drain long-lived daemon consumers before changes that would
+prune their leased generations; see [daemon updates](/advanced/daemon/#services-and-software-updates).

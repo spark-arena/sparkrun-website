@@ -47,9 +47,9 @@ command: |
 ## Model pre-sync
 
 When model pre-sync is enabled (the default), sparkrun:
-1. Downloads only the matching GGUF quant files locally
-2. Distributes them to target hosts via rsync
-3. Rewrites `-hf` to `-m` with the resolved container cache path
+1. Selects the matching GGUF quantization, multipart files, and optional projector from one immutable revision
+2. Acquires/copies them under the effective transfer policy and validates every required target
+3. Rewrites `-hf` to `-m` with the validated workload cache path
 
 The container serves from the local copy without re-downloading.
 
@@ -67,3 +67,5 @@ llama.cpp has an experimental RPC backend for multi-node inference. Worker nodes
 :::caution
 This is still evolving both upstream and in sparkrun. The fastest DGX Spark interconnect communication uses NCCL and RoCE — llama.cpp's RPC mechanism involves more overhead.
 :::
+
+Use matching projector/file-selection settings when inspecting or importing inventory. See [Model Cache Management](/advanced/cache-management/) for offline reuse and targeted repair.

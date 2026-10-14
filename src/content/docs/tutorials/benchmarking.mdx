@@ -92,7 +92,7 @@ benchmark_qwen3-1.7b-sglang_spark-arena-v1_tp1.csv
 To specify a custom output path:
 
 ```bash
-sparkrun benchmark qwen3-1.7b-sglang --solo --out my-results.yaml
+sparkrun benchmark qwen3-1.7b-sglang --solo --output my-results.yaml
 ```
 
 ## 4. Benchmark a running model
@@ -166,7 +166,7 @@ sparkrun benchmark qwen3-1.7b-sglang --solo \
 
 ## 8. Resumable runs
 
-Long benchmark sweeps (a profile with many `pp` × `tg` × `depth` × `concurrency` combinations) can take hours. sparkrun checkpoints progress after every task, so an interrupted sweep — Ctrl+C, OOM, transient SSH hiccup, anything — picks up exactly where it left off on the next invocation.
+Long benchmark sweeps (a profile with many `pp` × `tg` × `depth` × `concurrency` combinations) can take hours. sparkrun checkpoints progress after every task, so completed tasks can be reused after interruption. A tool-eval-bench suite is one task: a failed suite restarts as a whole even though scenario progress is displayed.
 
 Re-run the same command and sparkrun prompts to confirm resume:
 
@@ -187,7 +187,10 @@ sparkrun benchmark perf qwen3-1.7b-sglang --profile spark-arena-v1 --solo --resu
 
 `--resume` and `--fresh` are mutually exclusive. `--fresh` deletes prior state and starts over. With neither flag, non-TTY invocations (CI, piped stdin) default to resume; TTY invocations prompt.
 
-By default, `--exit-on-first-fail` halts the sweep on the first failing task so the issue can be fixed before more compute is spent. Pass `--no-exit-on-first-fail` to keep going through the remaining tasks instead.
+A failed benchmark task stops the sweep by default. Fix the cause, then resume
+with the same recipe and settings; usable results from completed tasks are retained.
+An incomplete schedule remains a failed, resumable run and is not published as a
+successful benchmark.
 
 To keep results comparable across long, possibly-resumed sweeps, sparkrun pins two things on the first successful launch:
 
@@ -208,20 +211,29 @@ sparkrun benchmark perf qwen3-1.7b-sglang --solo --profile spark-arena-v1 --dry-
 
 ## 10. Submit to Spark Arena
 
-Add `--arena` to any `perf` invocation to run the opinionated Spark Arena profile (`@official/spark-arena-v2`) and upload results to the leaderboard:
+Log in with `sparkrun arena login`, then add `--arena` to your benchmark command
+to submit its results. Real submissions default to the standardized
+`@official/spark-arena-v2` profile; an explicit `--profile` takes precedence.
 
 ```bash
-sparkrun benchmark perf qwen3-1.7b-sglang --solo --arena
+sparkrun arena login
+sparkrun benchmark qwen3-1.7b-sglang --solo --arena
 ```
 
-The legacy `sparkrun arena benchmark <recipe>` continues to work as an alias and uses the same underlying flow (auth check, hardcoded profile, upload). See the [Spark Arena tutorial](/tutorials/spark-arena/) for the full submission walkthrough.
+The explicit `benchmark perf <recipe> --arena` form also works. Use
+`sparkrun arena status` to check authentication and `sparkrun arena logout` to
+remove stored credentials. See the [Spark Arena tutorial](/tutorials/spark-arena/)
+for the full submission and resume walkthrough.
 
 ## 11. Using the Python API
 
 Everything in this tutorial is also available as a typed Python API for automation:
 
 ```python
+from sparkrun.application import initialize
 from sparkrun.api import benchmark, BenchmarkOptions, ResumeMode
+
+context = initialize()
 
 result = benchmark(BenchmarkOptions(
     recipe="qwen3-1.7b-sglang",
@@ -230,8 +242,8 @@ result = benchmark(BenchmarkOptions(
     solo=True,
     bench_args={"pp": [2048], "tg": [128]},      # equivalent to -b pp=2048 -b tg=128
     resume=ResumeMode.IF_EXISTS,                  # or AUTO / FRESH / REQUIRED
-    arena=False,                                  # set True for arena submission flow
-))
+    integrations={},                             # {"arena": {}} selects Arena publication
+), sctx=context)
 
 print(result.success, result.benchmark_id)
 print(result.container_image_sha)                 # pinned digest used at launch
@@ -239,6 +251,22 @@ print(result.outputs["yaml"])                     # path to exported result yaml
 ```
 
 The API never writes to stdout or calls `sys.exit`; failures raise typed exceptions (`BenchmarkFailed`, `NoResumableState`, `FrameworkCategoryMismatch`, etc.).
+
+## Progress and result recovery
+
+Fresh benchmarks share `run` placement and readiness output. Tool-eval-bench
+v2.8.0 shows scenario verdicts and observed exact totals; multi-trial/unknown totals
+have no percentage. Saved refs remain pinned, and suite-level resume does not
+become per-scenario resume. llama-benchy emits task-level feedback.
+
+A measurement can finish while export/publication fails. Retain the benchmark ID
+and completed results; finalization retry does not imply remeasurement. Keep
+credentials in execution-time environment/credential sources, never checkpoints.
+See [Benchmark API](/developer-reference/benchmark-api/) for typed callbacks and
+`BenchmarkFinalizationFailed`.
+
+`--skip-run` requires verified deployment/provenance for the selected recipe;
+endpoint reachability alone is insufficient. See [benchmark](/cli/benchmark/).
 
 ## Next steps
 

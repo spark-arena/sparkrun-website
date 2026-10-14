@@ -35,8 +35,7 @@ than failing loudly.
   cluster runtime that's been validated end-to-end, every benchmark profile.
   Stay on Docker unless you have a specific reason to leave.
 - **Local** — bare-metal experimentation when you don't want a container in
-  the loop, or when the host platform doesn't run Docker (e.g. Apple Silicon
-  MLX). Inherits the host's library environment verbatim. Multi-host native
+  the loop, on a supported Linux target. Portable controllers do not qualify Apple GPU execution. It uses the host environment or an explicitly prepared environment. Multi-host native
   cluster runtimes (`vllm-distributed`, `sglang`) work; Ray-based runtimes
   do not.
 
@@ -62,12 +61,69 @@ If a layer names an executor that is unknown or gated off, resolution raises
 `ExecutorUnavailableError` naming the flag to enable. It never falls back to
 Docker.
 
+## Docker launch defaults
+
+Normal sparkrun Docker launches are non-privileged and include
+`no-new-privileges`. Seccomp policy, Linux capabilities, and locked-memory limits
+are separate settings.
+
+### Seccomp profiles
+
+In 0.4.0, sparkrun defaults to `seccomp=io-uring`: a bundled, pinned copy of
+[Moby's default profile](https://github.com/moby/profiles/blob/61eaf32614c7c71b60bd8927d3e6a4ffc8ff1f31/seccomp/default.json)
+with an allow rule for `io_uring_setup`, `io_uring_enter`, and `io_uring_register`.
+The default deny action, architecture mappings, and other rules remain intact.
+[Atlas](/runtimes/atlas/#docker-options) uses this shared policy.
+
+Select a profile through `executor_config.security_opt` in application config,
+a cluster, a recipe, or API overrides:
+
+| Setting | Behavior |
+| --- | --- |
+| `seccomp=io-uring` | sparkrun's default profile with the three io_uring syscalls allowed |
+| `seccomp=builtin` | Docker's own default profile |
+| `seccomp=/path/to/profile.json` | A custom profile loaded from the controller |
+| `seccomp=unconfined` | Explicitly disables seccomp filtering |
+
+These selections are interpreted by sparkrun; `io-uring` is not a Docker built-in
+profile name. If no seccomp option is supplied, including an empty security-options
+list, sparkrun selects `io-uring`. Explicitly privileged containers remain subject
+to Docker's privileged-container behavior.
+
+For a custom policy:
+
+```yaml
+executor_config:
+  security_opt:
+    - no-new-privileges
+    - seccomp=/home/operator/policies/inference.json
+```
+
+The path is local to the controller running sparkrun. `~` expands to that user's
+home, and relative paths resolve against its working directory. sparkrun validates
+and snapshots the policy before replacing a workload, then carries its contents
+in each node's launch script. The nodes do not need a copy at the same path.
+Docker validates target-specific policy support when creating the container.
+Custom profiles are used as supplied; include any io_uring permissions your
+workload needs. Preview generation reads and validates the local file without
+writing to remote hosts.
+
+### Capabilities and locked memory
+
+The shared Docker defaults do not add `IPC_LOCK` or `SYS_NICE`. A runtime or
+explicit `executor_config.cap_add` can add capabilities;
+[Atlas adds both](/runtimes/atlas/#docker-options).
+
+Normal non-privileged launches receive `--ulimit memlock=-1:-1`, removing the
+soft and hard locked-memory limits. That does not grant `IPC_LOCK`: a resource
+limit and a Linux capability control different things. Recipes and executor
+overrides can supply their own `ulimit` settings.
+
 ## Recipe example
 
 ```yaml
 model: Qwen/Qwen3-1.7B
 runtime: vllm
-container: scitrera/dgx-spark-vllm:latest
 executor: local
 
 executor_config:
@@ -100,3 +156,12 @@ tears down both.
 For the contributor-facing executor reference (`ExecutorConfig.from_chain`
 field-by-field, `EXT_EXECUTOR` SAF discovery), see
 [`docs/EXECUTORS.md`](https://github.com/spark-arena/sparkrun/blob/main/docs/EXECUTORS.md).
+
+## Resolved destinations and native recovery
+
+Per-host executor configuration and destination constraints are part of the plan,
+including filesystem/model access and ownership. Native workloads need verified
+process identity and recovery records; stale metadata is not authority to adopt,
+kill, or delete an unrelated process. See [Execution Flow](/developer-reference/execution-flow/).
+Kubernetes requires the `k8s` plugin to be loaded plus the requested child
+capability and lives under `sparkrun.plugins.k8s`.

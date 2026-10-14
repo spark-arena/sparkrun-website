@@ -1,0 +1,154 @@
+---
+title: Benchmark API
+description: Typed benchmark results, progress, decisions, resume, and finalization retries.
+---
+
+Initialize an application and reuse its context. The library does not construct
+a terminal UI or obtain interactive authorization on your behalf.
+
+```python
+from queue import SimpleQueue
+from sparkrun.application import initialize
+from sparkrun.api import BenchmarkOptions, ResumeMode, benchmark
+
+context = initialize()
+events = SimpleQueue()
+options = BenchmarkOptions(
+    recipe="qwen3-1.7b-sglang",
+    category="performance",
+    cluster="mylab",
+    resume=ResumeMode.IF_EXISTS,
+    integrations={},
+    progress_callback=events.put,
+    decision_callback=lambda request: request.default,
+)
+outcome = benchmark(options, sctx=context)
+print(outcome.success, outcome.benchmark_id, outcome.outputs)
+```
+
+Select publication hooks with `integrations={"arena": {}}`; the removed `arena`
+option and private CLI wrappers are not supported. Recipe trust is a separate
+boolean. The frontend must explicitly authorize any integration confirmation it
+intends to accept; Arena quality confirmation defaults to declining without a
+handler. Reusing a default decision is not a blanket approval policy.
+
+## Inputs and resume
+
+Recipe/cluster inputs accept names or preloaded objects. Preloaded objects retain
+in-memory policy; use separate recipe instances when you need an unchanged template.
+Mappings are normalized/copied at API entry; non-string keys and unsupported
+objects fail before hooks or launch. Credentials belong in execution-time sources,
+not `bench_args`, recipe overrides, `state_extras`, or persisted examples.
+`api_key_env` names the environment/Variables key to resolve when executing.
+
+| `ResumeMode` | Meaning |
+| --- | --- |
+| `IF_EXISTS` | Reuse saved state when present, otherwise start fresh |
+| `REQUIRED` | Require resumable state |
+| `FRESH` | Discard prior state and remeasure |
+| `AUTO` | Ask the decision callback about incomplete/complete state |
+
+The option field is `resume`. `resume_benchmark(id, sctx=context)` resumes by
+saved ID without re-resolving a recipe. Incomplete resumes require verified saved
+execution provenance and running inference. Completed measurements can retry
+saved integrations without inference, measurement tools, or inference credentials.
+Unavailable integrations' saved data is preserved.
+
+## Progress and decisions
+
+`progress_callback` receives typed `ProgressEvent` records synchronously. Enqueue
+UI work and return promptly. `schedule_started`, `task_start`, `task_end`,
+`results_update`, and `schedule_finished` describe task scheduling. The finish
+event also occurs on failure; only `run_complete` means successful API return.
+`results_update` is a detached consolidated result tree.
+
+`task_progress.data["feedback"]` contains normalized
+[structured feedback](/developer-reference/feedback/). Advisory task-progress
+subscriber failures do not abort measurement; earlier legacy callback exceptions
+can propagate after owned cleanup. Interrupts remain interrupts.
+
+`decision_callback` receives a frozen `BenchmarkDecision`; return a boolean:
+
+| Kind | True | False | Default |
+| --- | --- | --- | --- |
+| `resume_incomplete` | Resume | Start fresh | True |
+| `remeasure_complete` | Remeasure | Reuse | False |
+| `integration_confirmation` | Continue | Decline | Integration's explicit default |
+
+The first two apply to `AUTO`. Progress callbacks do not make decisions.
+
+## Scenario progress
+
+New tool-eval-bench runs default to **v2.8.0**. Saved benchmark refs remain pinned;
+a changed default creates a distinct measurement identity. The live table shows
+scenario ID, verdict, points, duration, and final-artifact failure kind. Totals come
+from observed events/artifacts. Only exact totals support percentages.
+
+Multi-trial streams have no trial boundaries: count result events with unknown
+total, without an invented percentage or trial index. The final table is the last
+trial; saved `trial_statistics` contains aggregates. Filtered/custom packs also
+use observed counts. Malformed events stay diagnostic and do not determine success.
+The suite is **one resumable task**: a failed task retries the suite, not individual
+scenario rows. An emitted completion event cannot override a failing process exit.
+
+At least one graded scenario and a positive scoring denominator are needed for a
+measurement. Zero quality scores are valid; infrastructure-only failures remain
+failed/resumable. Accepted partial results retain completion/exclusion information.
+llama-benchy reports task start/finish through the same feedback interface; it does
+not claim the tool evaluator's per-scenario detail.
+
+## Results and finalization retry
+
+`BenchmarkResult` includes `success`, `benchmark_id`, framework/profile/category,
+`results`, absolute export paths in `outputs`, host/image provenance, metadata,
+`resumed`, `already_complete`, and integration outcomes. `run_result` exists only
+when this invocation launched inference. Integrations receive recursively immutable
+measurement/state snapshots; publication retries cannot relabel measured settings.
+
+Measurement completion is separate from export, cleanup, notification, integration,
+or state failure. `BenchmarkFinalizationFailed` carries the completed `result`,
+`stage`, `errors`, and original cause. `BenchmarkIntegrationFailed` is a subtype.
+
+```python
+from sparkrun.api import BenchmarkFinalizationFailed, benchmark, resume_benchmark
+
+try:
+    outcome = benchmark(options, sctx=context)
+except BenchmarkFinalizationFailed as exc:
+    print(exc.result.results, exc.stage, exc.errors)
+    saved_id = exc.result.benchmark_id
+    # Persist/display the completed result in this frontend.
+
+# In a later retry action, only if completed state was saved:
+# outcome = resume_benchmark(saved_id, sctx=context)
+```
+
+A retry of saved integrations does not remeasure or repair optional export files.
+If persistence itself failed, preserve the exception's result in your frontend;
+recovery by ID requires saved state. With no available integrations, loading a
+completed ID returns `already_complete=True` without rewriting it or contacting
+inference. Execution-time credentials are reacquired for work that needs them.
+
+Inference owned by the invocation is cleaned up after launch on failures unless
+`no_stop` is set. `skip_run`, an already-running deployment, and resume-by-ID do not
+stop someone else's inference. Check deployment identity/provenance when using
+`skip_run`; an arbitrary reachable endpoint does not establish a valid measurement.
+Fresh launches share `run` planning/readiness presentation. Startup observations
+are distinct from benchmark request latency and omitted for unobserved/reused launches.
+
+## Diagnostic capture
+
+Wrap `benchmark` or `resume_benchmark` in `api.capture_diagnostics(...)` to retain
+operation-attributed DEBUG logs, structured feedback, and plugin evidence in a
+bounded NDJSON bundle. When a benchmark owns and stops inference, capture saves
+log tails before cleanup, even after successful measurements. Later publication
+or export failures therefore retain that evidence; final capture does not reread
+removed sources. Read errors make collection partial without replacing the
+benchmark error or preventing cleanup. Cancellation skips new reads.
+
+Capture preserves `skip_run`, `no_stop`, reuse, and resume ownership behavior.
+Daemon benchmark jobs accept `collect_diagnostics: true`; there is no dedicated
+benchmark CLI flag. See [Diagnostics API](/developer-reference/diagnostics-api/).
+
+For timeout, authentication, framework, and integration contracts see the pinned
+[benchmark guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/BENCHMARK_API.md).

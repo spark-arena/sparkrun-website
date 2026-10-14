@@ -19,3 +19,7 @@ dist/
 .vscode/
 *.swp
 *.swo
+
+# Isolated documentation verification
+.venv-docs/
+__pycache__/

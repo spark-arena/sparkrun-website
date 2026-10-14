@@ -60,7 +60,7 @@ cluster can cap the usable fraction of each accelerator:
 sparkrun cluster create mylab --hosts 10.0.0.1 --max-gpu-mem-util 0.85
 ```
 
-On DGX Spark's GB10 this cap defaults to 0.85 — the unified-memory
+On DGX Spark's GB10 this cap defaults to **0.90** — the unified-memory
 architecture means the last slice of "GPU memory" is contended with the host,
 so treating 100% as available produces placements that fit on paper and OOM in
 practice. Elsewhere it defaults to 1.0.
@@ -69,7 +69,7 @@ practice. Elsewhere it defaults to 1.0.
 `--max-gpu-mem-util` is the *scheduling and fit* cap: how much of the
 accelerator sparkrun treats as available when deciding placement. The
 `--gpu-mem` / `--gpu-memory-utilization` run flag is passed to the serving
-engine itself. Changing one does not change the other.
+engine itself. Changing one does not change the other. DGX Spark’s default serving utilization for **vLLM and SGLang** is **0.80**; an explicit recipe or run override can choose another value.
 :::
 
 The cap resolves per accelerator, highest priority first: the host's own
@@ -79,6 +79,12 @@ cluster-wide `--max-gpu-mem-util`, then the platform default, then 1.0.
 When no host can satisfy the request, the launch fails with an
 `InsufficientCapacity` error that names the slots seen versus requested rather
 than starting a job that cannot fit.
+
+### Reservations versus estimates
+
+Ordinary workloads reserve accelerators exclusively; a runtime utilization below 1 does not promise that another workload can share the same GPU. Scheduling reservations govern admission, while the serving engine controls its own memory allocation.
+
+Model weights, KV-cache demand, runtime overhead, scheduling budget, and observed free capacity are different quantities. MLA and hybrid cache architectures may produce an unknown or lower-bound estimate. Missing hardware/cache evidence is not a successful fit check. Use the placement diagnostics and actual runtime readiness to assess a launch; do not treat a weight-only estimate as a memory guarantee.
 
 ## Explicit placement with `layout`
 

@@ -9,12 +9,30 @@ description: Update channels, self-upgrade behavior, and the anonymous telemetry
 sparkrun update
 ```
 
-This upgrades sparkrun itself (if it was installed via `uv`) and then always
-refreshes your recipe registries from git. `sparkrun setup update` is the same
-command under its full name.
+This upgrades core when installed as a uv tool, reconciles compatible trusted managed plugins, and refreshes recipe registries. `sparkrun setup update` additionally accepts `--no-update-registries`; the top-level command does not. Both accept `--no-update-plugins`.
 
 If sparkrun was installed some other way — `pip`, `pipx`, or an editable
-checkout — the self-upgrade step is skipped and only registries are updated.
+checkout — the core self-upgrade step is skipped; plugin reconciliation and registry refresh still apply.
+
+### Plugin reconciliation and state
+
+```bash
+sparkrun update --no-update-plugins
+sparkrun setup update --no-update-plugins --no-update-registries
+```
+
+The opt-out still audits local compatibility, including disabled/unmanaged plugins,
+but fetches no plugin revisions and does not report remote update availability.
+Unmanaged sources are never rewritten. Incompatible/unknown candidates and failed
+load checks leave active generations intact. Other updates continue after a
+failure: core-update warnings can be nonfatal, while explicit `plugins update`
+reports partial failure with a nonzero status. Failed/unverifiable core upgrades
+permit an audit only. See [Managed Plugins](/advanced/plugins/) for pins and rollback.
+
+Stop/drain daemon and worker leases before replacing their interpreter environment;
+restart long-lived plugin consumers after updates. The managed store is config-
+adjacent and independent of the core environment. See
+[What’s New in 0.4.0](/getting-started/whats-new-0-4/) for the changes in this release.
 
 ## Release channels
 
@@ -77,8 +95,7 @@ it is disabled in config. The persisted setting lives at `telemetry.enabled` in
 
 ### What is collected
 
-Four event types are emitted: `run`, `benchmark`, `update`, and
-`setup_wizard`. Each carries a random installation ID plus:
+Events include `run`, `benchmark`, `update`, `setup_wizard`, and optional `daemon_serve`. Fields depend on the event; the common envelope includes installation/system/version data and `via_daemon` attribution. Operation events can include:
 
 - OS name, OS release, and CPU architecture.
 - **The model identifier** from the recipe — but only when it is a repo
@@ -97,7 +114,7 @@ Four event types are emitted: `run`, `benchmark`, `update`, and
 
 Hostnames, IP addresses, SSH usernames, recipe names and paths, registry names,
 and registry URLs are not sent. Emission is best-effort with a sub-second
-timeout, so it never delays or fails a command.
+timeout; reporting failures do not fail the operation.
 
 ### Model identifiers
 
@@ -124,3 +141,7 @@ where model detection was skipped all yield `<unknown-visibility>` rather than
 the name — being unable to check is never treated as permission to send.
 
 Local paths are classified without contacting the Hub at all.
+
+Daemon serving lifecycle, `via_daemon`, and host-side opt-out behavior are detailed
+in the [daemon reference](/advanced/daemon/#anonymous-usage-telemetry). The durable
+job journal is not uploaded as usage telemetry; monitoring streams are separate.

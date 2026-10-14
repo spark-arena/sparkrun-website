@@ -122,3 +122,13 @@ sparkrun cluster check-job <recipe>
 ```
 
 Check whether a specific recipe's containers are still running across cluster hosts.
+
+## Placement, state, and cache policy
+
+Hardware inventory, per-host executor destinations, and live reservations determine
+placement. Ordinary workloads reserve accelerators exclusively; a low engine memory
+fraction does not automatically permit co-location. See [Schedulers](/advanced/schedulers/).
+Workload metadata is shared across direct and daemon calls, while daemon operation
+history is separate. Missing observations are not proof of idle capacity.
+Cluster model validation/selection/provider settings and runtime cache cleanup are
+covered in [Model Cache Management](/advanced/cache-management/).

@@ -35,7 +35,8 @@ sparkrun provides a unified CLI for managing LLM inference workloads on DGX Spar
 | `sparkrun logs <target>` | Re-attach to workload logs (recipe name or cluster ID) |
 | `sparkrun status` | Show running sparkrun containers (alias for `cluster status`) |
 | `sparkrun benchmark <recipe>` | Benchmark an inference recipe (auto: run → benchmark → stop) |
-| `sparkrun update` | Update sparkrun + registries (`--no-update-registries` to skip) |
+| `sparkrun benchmark <recipe> --arena` | Benchmark and submit results to Spark Arena |
+| `sparkrun update` | Update core, compatible managed plugins, and registries; `--no-update-plugins` skips plugin fetching |
 
 ### Recipe commands
 
@@ -122,7 +123,7 @@ See [tune](/cli/tune/) for details.
 
 | Command | Description |
 |---|---|
-| `sparkrun proxy start` | Start the LiteLLM-based inference proxy |
+| `sparkrun proxy start` | Start the selected gateway (LiteLLM by default) |
 | `sparkrun proxy stop` | Stop the running proxy |
 | `sparkrun proxy status` | Show proxy status and registered models |
 | `sparkrun proxy models` | List models registered with the proxy |
@@ -136,14 +137,17 @@ See [proxy](/cli/proxy/) for details.
 
 ### Arena commands
 
+These commands manage Spark Arena authentication.
+
 | Command | Description |
 |---|---|
 | `sparkrun arena login` | Authenticate with Spark Arena via OAuth |
 | `sparkrun arena logout` | Remove stored Spark Arena credentials |
 | `sparkrun arena status` | Show Spark Arena login status |
-| `sparkrun arena benchmark <recipe>` | Benchmark a recipe and submit results to Spark Arena |
 
-See [Spark Arena](https://spark-arena.com) for the leaderboard and community benchmarks.
+Use `sparkrun benchmark <recipe> --arena` to run and submit benchmarks. See the
+[Spark Arena tutorial](/tutorials/spark-arena/) for the submission workflow and
+[Spark Arena](https://spark-arena.com) for the leaderboard.
 
 ### Setup commands
 
@@ -151,7 +155,7 @@ See [Spark Arena](https://spark-arena.com) for the leaderboard and community ben
 |---|---|
 | `sparkrun setup install` | Install sparkrun as a uv tool + tab-completion + registry sync |
 | `sparkrun setup completion` | Install shell tab-completion (bash/zsh/fish) |
-| `sparkrun setup update` | Update sparkrun + registries (alias: `sparkrun update`) |
+| `sparkrun setup update` | Update core, plugins, and registries; supports `--no-update-plugins` and `--no-update-registries` |
 | `sparkrun setup ssh` | Set up passwordless SSH mesh across hosts |
 | `sparkrun setup cx7` | Detect and configure ConnectX-7 NICs across hosts |
 | `sparkrun setup fix-permissions` | Fix root-owned HF cache files on cluster hosts |
@@ -169,3 +173,15 @@ See [Spark Arena](https://spark-arena.com) for the leaderboard and community ben
 `sparkrun setup tailscale` (publish an inference endpoint on a tailnet) ships
 gated behind a feature flag and is hidden until enabled. See
 [Feature Flags](/advanced/feature-flags/).
+
+### Plugins, daemon, and model caches
+
+| Command | Reference |
+| --- | --- |
+| `sparkrun plugins list/add/update/remove/rollback` | [Managed plugin commands](/cli/plugins/); use one subcommand at a time |
+| `sparkrun daemon` | [Daemon lifecycle and client](/cli/daemon/); optional feature, direct CLI remains default |
+| `sparkrun model-cache` | [Model-cache commands](/cli/model-cache/); advanced help visibility |
+| `sparkrun setup ssh-rotate-keys` | [Confirmed identity rotation](/cli/setup-commands/#ssh-server-identity-rotation) |
+
+Show advanced help with `SPARKRUN_ADVANCED=1`. Feature gates remain separate from
+visibility. See [What’s New in 0.4.0](/getting-started/whats-new-0-4/) for release highlights.
