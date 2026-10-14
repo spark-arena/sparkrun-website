@@ -3,7 +3,7 @@ title: proxy
 description: Unified OpenAI-compatible gateway for sparkrun inference endpoints.
 ---
 
-The `sparkrun proxy` commands manage a pluggable inference gateway. **LiteLLM is the bundled default on all channels**. Explicitly enabling a gateway capability selects that provider; enabling its plugin alone preserves the selection.
+The `sparkrun proxy` commands manage a pluggable inference gateway. **LiteLLM is the bundled default on all channels**. To use SparkRoute, install its plugin and activate its gateway capability as shown below.
 
 ## Overview
 
@@ -37,18 +37,41 @@ read-only, to report what the proxy is currently serving.
 
 ## Choose a gateway
 
+Install and activate SparkRoute, then start the selected gateway:
+
 ```bash
+# Install the plugin and enable loading
 sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --enable
+
+# Enable the gateway capability and select SparkRoute as the default
 sparkrun setup features enable gateway.sparkroute
+
+# Start the selected gateway
 sparkrun proxy start --host 127.0.0.1
-# Return to the bundled gateway; use --restart if already running.
-sparkrun proxy start --gateway litellm --restart
 ```
 
-`--gateway` persists `proxy.gateway` in `proxy.yaml`. Management binds to the
-recorded running implementation. An absent pinned plugin does not silently switch
-to LiteLLM; process status/stop remain usable, while model/config operations need
-the plugin. See [Managed Plugins](/advanced/plugins/).
+`plugins add --enable` enables plugin loading and preserves capability settings.
+The feature-enable command activates `gateway.sparkroute` and saves SparkRoute
+as `proxy.gateway` in `proxy.yaml`, even if the capability was already enabled.
+Subsequent starts use that selection without a `--gateway` argument. If the
+plugin is already installed but disabled, use `sparkrun plugins enable sparkroute`
+before activating its gateway capability.
+
+To return to the bundled LiteLLM gateway:
+
+```bash
+sparkrun setup features enable gateway.litellm
+sparkrun proxy start --restart
+```
+
+Selection does not restart a running gateway. Use `--restart` when replacing an
+existing instance, including when first switching to SparkRoute. Other gateway
+capabilities remain enabled. `proxy start --gateway NAME` is also available to
+select and persist a provider whose capability is already enabled.
+
+Management binds to the recorded running implementation. An unavailable selected
+plugin does not silently switch to LiteLLM; process status/stop remain usable,
+while model/config operations need the plugin. See [Managed Plugins](/advanced/plugins/).
 
 `proxy ui`, `proxy admin-token`, aliases, and update mechanisms depend on gateway
 capabilities. Unsupported management fails explicitly. A saved discovery cluster
