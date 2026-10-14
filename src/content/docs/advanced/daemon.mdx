@@ -319,7 +319,7 @@ status/sleep/wake accessed through these core operations.
 - `GET /v1/streams/logs`: cancellable finite/follow logs for Docker and native
   Kubernetes workloads; bounded buffering with gap events. Select with
   `workload_id`, then optional `host`, `container`, or `source_id` filters.
-  `hosts` remains the full workload topology. See [Logging API](/developer-reference/logging-api/).
+  `hosts` remains the full workload topology. See [Log Streaming API](/developer-reference/logging-api/).
 - `GET /v1/streams/monitor`: reference-counted monitor sessions, latest frame,
   five-second teardown linger. Disconnect/cancellation closes quiet reads too.
 

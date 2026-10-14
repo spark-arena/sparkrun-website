@@ -78,7 +78,7 @@ processes inherit the selected profile/config. See the pinned
 | Resolve/import/retain | `resolve_catalog_recipe`, `import_recipe`, `retain_catalog_recipe`, `cleanup_catalog_imports` |
 | Registry/cluster catalog | `list_registries`, `configure_registry`, `refresh_registries`, `list_clusters`, `catalog_cluster_capacity` |
 | Placement/occupancy | `schedule`, `status`, `status_report`, `find_running_intent` |
-| Workload metadata and logs | `list_jobs`, `open_log_target`, `logs`; [Logging API](/developer-reference/logging-api/) |
+| Workload metadata and logs | `list_jobs`, `open_log_target`, `logs`; [Log Streaming API](/developer-reference/logging-api/) |
 | Diagnostic bundles | `collect_diagnostics`, `capture_diagnostics`, `DiagnosticsResult`; [Diagnostics API](/developer-reference/diagnostics-api/) |
 | Plugin and capability policy | `api.plugins.enable/disable`, `api.features.enable/disable/reset` |
 | Monitoring | `live_monitor`, `open_live_monitor`, `open_telemetry` |
@@ -152,7 +152,7 @@ follow, or page their output. `api.logs(workload_id, ...)` is the convenience
 iterator. The logging selector is `workload_id`, whose value is returned by
 `RunResult.cluster_id`; other lifecycle APIs retain their existing names. Keep
 `hosts` as the full topology and select one source with `host`, `container`, or
-`source_id`. See [Logging API](/developer-reference/logging-api/) for cancellation,
+`source_id`. See [Log Streaming API](/developer-reference/logging-api/) for cancellation,
 finite export, native Kubernetes, and resource changes.
 
 Diagnostic capture wraps operations without adding fields to `RunOptions`:

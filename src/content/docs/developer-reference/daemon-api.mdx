@@ -227,7 +227,7 @@ Unknown/invalid query parameters are rejected before streaming. Records include
 source identity and native resource metadata where applicable. Reader failures
 become SSE errors; disconnect cancels finite and following readers. Reads never
 remove saved workload metadata or release cache claims. See
-[Logging API](/developer-reference/logging-api/) for ordering, source changes, and
+[Log Streaming API](/developer-reference/logging-api/) for ordering, source changes, and
 cancellation. There is no daemon paging route or server-side log target ID.
 
 Job feedback at `/v1/jobs/{id}/events` supports durable replay with `Last-Event-ID`.
