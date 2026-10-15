@@ -7,7 +7,7 @@ description: Stop a running inference workload.
 sparkrun stop [target] [options]
 ```
 
-Stop a running inference workload across its executor destinations. TARGET can be a recipe name or a cluster ID (from `sparkrun status` output). When `--all` is used, TARGET is optional and discovered sparkrun workloads on the selected cluster will be stopped.
+Stop a running inference workload across its executor destinations. TARGET can be a recipe name or a workload ID (from `sparkrun status` output). When `--all` is used, TARGET is optional and discovered sparkrun workloads on the selected cluster will be stopped.
 
 Confirmed stops release the workload's model-cache claims on the stopped hosts
 and restart the cache retention age. If claim release fails, retry normal stop.
@@ -40,9 +40,13 @@ sparkrun stop --all --cluster mylab
 sparkrun stop --all --hosts 10.24.11.13,10.24.11.14
 ```
 
-:::caution
-The `--hosts`/`--cluster`/`--tp` flags must match the original `run` command so sparkrun can find the right containers. If you launched with `--tp 2`, pass `--tp 2` to stop as well.
-:::
+When selecting by recipe, use the cluster/host scope where it ran and the same
+intent-changing overrides, such as `--tp 2`. Selecting by workload ID uses the
+job's recorded hosts and connection settings; changing the default cluster does
+not redirect that connection. Explicit `--hosts` can override the target host list.
+
+`--dry-run` resolves the target and executor and can contact hosts for discovery,
+but performs no teardown or claim release.
 
 :::note[Discovery and reporting in 0.3.0]
 `--all` discovers workloads through the same cross-executor status source as

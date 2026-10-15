@@ -84,7 +84,9 @@ sparkrun setup features disable executor.local
 sparkrun setup features reset executor.local
 ```
 
-Manage the gates on experimental capabilities. See
+With no subcommand, `setup features` lists enabled flags, as does `list`.
+Use `sparkrun setup features list --all` for the full inventory, including
+disabled and setup-step flags. Manage the gates on experimental capabilities. See
 [Feature Flags](/advanced/feature-flags/) for the full list and resolution
 order.
 
@@ -122,14 +124,18 @@ If you installed via `sparkrun setup install`, tab completion is already configu
 
 ## Update sparkrun
 
+Use `sparkrun setup version --json` for machine-readable installed version and
+installation information.
+
 ```bash
 sparkrun update
 ```
 
 Updates sparkrun within the selected channel, reconciles compatible managed
-plugins, and refreshes recipe registries. Use `sparkrun setup update
---no-update-registries` to skip registry refresh; the top-level `sparkrun update`
-alias does not expose that option. See [Updates](/getting-started/updates/).
+plugins, and refreshes recipe registries. `sparkrun setup update` is the same
+command; both accept `--no-update-registries` and `--no-update-plugins`.
+Core upgrades require a uv tool installation, and a failed core upgrade exits
+nonzero. See [Updates](/getting-started/updates/).
 
 ## SSH mesh setup
 

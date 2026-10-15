@@ -49,7 +49,7 @@ branch, tag, or full commit with `--ref`:
 
 ```sh
 sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --ref main
-sparkrun plugins update sparkroute --ref refs/tags/v0.2.1
+sparkrun plugins update sparkroute --ref refs/tags/v0.3.2
 sparkrun plugins add https://github.com/sparksq/sparkrun-coldsnap-plugin --dry-run
 ```
 
@@ -132,8 +132,8 @@ sparkrun setup update --no-update-plugins --no-update-registries
 A fresh process checks the resulting core, Python, plugin/profile APIs, and
 installed dependency constraints. Incompatible or unknown candidates and failed
 load tests leave the active plugin intact. Other plugin updates continue after a
-failure. Core-update warnings are nonfatal; an explicit `plugins update` reports
-failure with a nonzero exit status. Unmanaged plugins are audited but never
+failure. A failed core upgrade exits nonzero, as does a failed explicit
+`plugins update`. Unmanaged plugins are audited but never
 modified. Failed core installs or unverifiable resulting identities permit only
 an audit, not repairs. An older core without the reconciliation helper reports
 that the audit is incomplete.
@@ -185,15 +185,16 @@ retained history does not indefinitely preserve files for running processes.
 
 ## Reading inventory
 
-`plugins list` inspects metadata without importing plugin code. The effective
+`plugins list` inspects metadata without importing plugin code. It shows enabled
+plugins by default, including in JSON; add `--all` for disabled entries. The effective
 loading state, actual loaded state, compatibility result, and optional load check
 are separate facts. Missing declarations are **unknown**, not compatible; unknown
 versions are JSON `null`. Read the diagnostics following the table. `--check`
 executes trusted managed plugins in a child process with a 60-second timeout,
-including disabled ones; it is not a metadata-only inspection.
+for listed entries (including disabled ones with `--all`); it is not a metadata-only inspection.
 
 The table's `FEATURES` column lists declared capability flags, including those of
-disabled plugins. It does not report whether those capabilities are enabled.
+disabled plugins when `--all` is used. It does not report whether those capabilities are enabled.
 `none` means there are no separate flags; `unavailable` means declarations could
 not be read. Use `setup features list` for effective capability state and its
 `OWNER` column. JSON inventory also includes `features`, `state_source`,

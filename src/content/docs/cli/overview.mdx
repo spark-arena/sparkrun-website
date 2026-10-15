@@ -32,8 +32,8 @@ sparkrun provides a unified CLI for managing LLM inference workloads on DGX Spar
 |---|---|
 | `sparkrun run <recipe>` | Launch an inference workload |
 | `sparkrun build <recipe>` | Prepare assets without inference; [advanced command](/cli/build/) |
-| `sparkrun stop [target]` | Stop a running workload (recipe name or cluster ID) |
-| `sparkrun logs <target>` | Re-attach to workload logs (recipe name or cluster ID) |
+| `sparkrun stop [target]` | Stop a running workload (recipe name or workload ID) |
+| `sparkrun logs <target>` | Re-attach to workload logs (recipe name or workload ID) |
 | `sparkrun status` | Show running sparkrun containers (alias for `cluster status`) |
 | `sparkrun benchmark <recipe>` | Benchmark an inference recipe (auto: run → benchmark → stop) |
 | `sparkrun benchmark <recipe> --arena` | Benchmark and submit results to Spark Arena |
@@ -51,7 +51,7 @@ sparkrun provides a unified CLI for managing LLM inference workloads on DGX Spar
 | `sparkrun recipe search <query>` | Search for recipes by name, model, or description |
 | `sparkrun recipe validate <recipe>` | Validate a recipe file |
 | `sparkrun recipe vram <recipe>` | Estimate VRAM usage for a recipe |
-| `sparkrun recipe update` | Refresh recipe registries from git |
+| `sparkrun registry update [NAME]` | Refresh all enabled recipe registries, or one named registry, from git |
 
 :::tip[Scoping to one registry]
 `list` and `search` accept an `@registry` scope in the query itself:

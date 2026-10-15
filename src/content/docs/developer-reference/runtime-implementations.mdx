@@ -4,7 +4,7 @@ description: Implement a RuntimePlugin with command generation, hardware and ima
 ---
 
 A runtime translates a recipe into commands and lifecycle behavior for an inference
-engine. Implement `RuntimePlugin` from `sparkrun.runtimes.base`, give it a unique
+engine. Implement `RuntimePlugin` from `sparkrun.plugins`, give it a unique
 `runtime_name`, and expose the class through a selected plugin module.
 [Plugin Development](/developer-reference/plugin-development/) covers packaging,
 API declarations, feature gates, and registration.
@@ -38,7 +38,7 @@ Put this in `example_runtime/plugin.py`, with a side-effect-free package
 ```python
 import shlex
 
-from sparkrun.runtimes.base import RuntimePlugin
+from sparkrun.plugins import RuntimePlugin
 
 SPARKRUN_PLUGIN_API_VERSION = 1
 
@@ -159,6 +159,8 @@ Declare your engine's revision flags with `model_revision_flags()`.
 | `serve_flag_map()` | Config-key-to-engine-flag mapping used by recipe validation. It does not generate commands automatically. |
 | `build_flags_from_map()` | Optional generation helper for mapped values, boolean toggles, negatable flags, and shell-quoted JSON values. It leaves ordinary strings unquoted; apply an appropriate quoting policy. |
 | `strip_flags_from_command()` | Remove mapped `skip_keys` from a rendered template; also honor those keys when generating flags. |
+| `append_args(command, *args)` | Append already-rendered shell arguments safely after a trailing line continuation. Quote literal values before passing them. |
+| `command_has_flag(command, flag)` | Match whole flags, including `--flag=value`, without confusing prefixes such as `--port` and `--port-range`. |
 | `validate_recipe()` | Extend the base findings. Use `recipe_error()` for unsupported configurations and `recipe_warning()` for portability problems. Bare strings are suggestions, not launch-blocking errors. |
 | `prepare(recipe, hosts, config=None, dry_run=False, transfer_mode="auto", overrides=None)` | Runtime preparation and target-dependent checks; returns `None`. Honor dry-run and effective overrides. This is separate from a builder's `prepare()` signature. |
 
@@ -216,7 +218,7 @@ CLI's readiness and detachment policy.
 
 These sources also power reusable `api.open_log_target()` targets, bounded
 [diagnostic capture](/developer-reference/diagnostics-api/), and daemon streams.
-The public logging selector is `workload_id` (the value in `RunResult.cluster_id`);
+The public logging selector is `workload_id` (the value in `RunResult.workload_id`);
 existing runtime hook signatures retain `cluster_id`. Native executors can resolve
 resource-aware sources with pod UID/container-instance identity. Keep transport
 stderr separate from workload output, and honor full-history, cancellation, and
@@ -230,6 +232,24 @@ for engine defaults. `get_extra_env()` supplies the mounted Hugging Face cache
 locations by default; merge the base values when adding to them.
 `get_extra_volumes()` declares additional mounts, while `get_extra_docker_opts()`
 is for Docker-specific launch requirements.
+
+Solo launch, cluster launch, and `api.materialize` use the same environment order,
+lowest to highest: communication, runtime cache, runtime common/mode defaults,
+per-host platform defaults, cluster/recipe environment and rendered templates,
+then runtime extras such as the mounted HF cache paths. Literal CLI environment
+overrides take precedence over recipe templates. Hardware-specific defaults
+therefore override generic runtime defaults while remaining below user settings.
+
+Runtime plugins are shared instances. Keep launch state off the singleton:
+the launcher binds the executor on an operation-local copy, and
+`run(..., platform_env_by_host=...)` receives per-host platform environment as a
+keyword-only argument. `_run_cluster` overrides must accept and forward `**kwargs`.
+Use each host's resolved executor for per-node preparation, file writes, and
+serve execution.
+
+Set `supports_per_node_env = False` for runtimes that cannot apply different
+environment values to individual ranks. TensorRT-LLM's head-driven MPI path does
+this; incompatible node-specific templates are rejected before replacement.
 
 An override of `_pre_serve(...)` must call `super()._pre_serve(...)` to retain
 recipe `pre_exec` hooks and mods. Shared launch paths propagate the operation's
@@ -257,6 +277,12 @@ when mapping ranks to hosts rather than assuming `hosts[rank]` always applies.
 The base implements solo execution, but its `_run_cluster()` and `_stop_cluster()`
 raise `NotImplementedError`. Returning `"native"` from `cluster_strategy()` does
 not by itself implement multi-node lifecycle.
+
+`replica_service_domains` controls how `api.materialize` groups data-parallel
+replicas. The default is one service for the full world; vLLM distributed opts
+into one `tp × pp` service per replica, with uniform local worker counts within
+each service. `presynced_gguf_overrides(recipe, cache_dir)` supplies companion
+file overrides after a GGUF model is resident; llama.cpp uses it for projectors.
 
 For a native distributed engine, implement:
 
@@ -296,8 +322,8 @@ Use these built-in implementations as references:
 
 | Implementation | Useful pattern |
 | --- | --- |
-| [RuntimePlugin base](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/base.py) | Required command hook, shared solo lifecycle, validation, logs, and caches |
-| [Modular MAX](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/modular_max.py) | Single-host placement and local-GPU validation |
-| [SGLang](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/sglang.py) | Native multi-node commands and readiness declarations |
-| [vLLM distributed](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/vllm_distributed.py) | Placement-aware rank commands and communication environment |
-| [llama.cpp](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/llama_cpp.py) | GGUF model paths, RPC workers, and custom log naming |
+| [RuntimePlugin base](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/base.py) | Required command hook, shared solo lifecycle, validation, logs, and caches |
+| [Modular MAX](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/modular_max.py) | Single-host placement and local-GPU validation |
+| [SGLang](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/sglang.py) | Native multi-node commands and readiness declarations |
+| [vLLM distributed](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/vllm_distributed.py) | Placement-aware rank commands and communication environment |
+| [llama.cpp](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/llama_cpp.py) | GGUF model paths, RPC workers, and custom log naming |

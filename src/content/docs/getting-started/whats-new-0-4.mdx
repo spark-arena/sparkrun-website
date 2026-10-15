@@ -28,9 +28,10 @@ See [Recipe Format](/recipes/format/#recipe-inheritance).
 
 ## Offline launches and reproducible exports
 
-`run`, `benchmark`, and `proxy load` accept `--offline` to reuse existing recipes,
+`run`, `build`, `benchmark`, and `proxy load` accept `--offline` to reuse existing recipes,
 images, and models, including copies within the cluster. Clusters can save an
-offline default; `--online` overrides it for one operation.
+offline default; `--online` overrides it for one operation. Recipe loading honors
+this policy too: offline operations do not fetch recipe URLs or refresh registries.
 
 `sparkrun export recipe --realize` resolves a recipe against selected hardware
 and bakes in matching overrides. It pins container digests and the primary model
@@ -56,6 +57,8 @@ fetching updates while retaining the local compatibility audit.
 `plugins enable` and `plugins disable` now control loading across bundled,
 managed, manual, and installed plugins, independently of capability flags.
 Inventory distinguishes loading state, compatibility, and declared features.
+Plugin and feature lists show enabled entries by default; add `--all` to inspect
+disabled entries too, including in JSON output.
 Explicitly enabling a gateway capability selects its provider. Plugin authors can
 use static manifests and lifecycle hooks to plan settings for management actions.
 
@@ -134,6 +137,21 @@ service on Linux. Normal proxy start/stop commands use the installed unit, and
 foreground supervision follows the gateway across managed restarts. See
 [Proxy service management](/cli/proxy/#run-as-a-systemd-service).
 
+Inference service exports retain the complete cluster definition and choose
+placement each time the service starts. See [export systemd](/cli/export/#export-systemd).
+
+## Trust before replacing a workload
+
+Untrusted `pre_exec`, `mods`, `post_exec`, and `post_commands` now share one
+authorization decision before preparation or eviction. Interactive launches list
+the hooks and ask once; non-interactive launches require explicit authorization.
+Dry runs report the required trust without executing hooks. `proxy load` also
+accepts `--trust`. See [Security & Trust](/advanced/security/).
+
+`stop --dry-run` previews target resolution without stopping workloads.
+Unreadable registry and proxy configuration files are preserved rather than
+overwritten with partial defaults.
+
 ## Optional daemon
 
 Applications can use an authenticated HTTP API with durable jobs, structured
@@ -181,8 +199,18 @@ for shape selection and launch behavior.
 - Put runtime settings such as port in `RunOptions.overrides`. Benchmark
   integrations use `BenchmarkOptions.integrations`, with public progress and
   decision callbacks.
+- Public results, lifecycle parameters, and daemon payloads use `workload_id`;
+  the earlier public `cluster_id` spellings have no aliases. Run/build options
+  accept only `recipe` positionally; other fields are keyword-only.
+- Readiness can attach to an existing workload by ID. New helpers expose runtime
+  protocols, recorded-job endpoint discovery, CX7 planning, SSH diagnosis, and
+  systemd export. Experimental lifecycle/setup/cache surfaces are identified in
+  the Python reference.
 - Plugins declare `SPARKRUN_PLUGIN_API_VERSION = 1`. Installed integrations use
   the shared `sparkrun.plugins` entry-point group and explicit selection.
+- Import supported extension contracts from `sparkrun.plugins`. Equal repeated
+  registrations are harmless; changed definitions raise `PluginConflictError`,
+  even when registered by the same owner.
 - Builders implement `prepare(..., builder_context=None)` in place of the old
   image-preparation hook. Arena and Kubernetes Python modules moved under
   `sparkrun.plugins`.

@@ -115,7 +115,7 @@ Queries may return results directly without job history. Identical retry keys
 replay the existing request; conflicting arguments return 409. A cursor older
 than retained events returns 410: fetch job state and resume available history.
 
-Job IDs identify operations. A result's workload `cluster_id` identifies the
+Job IDs identify operations. A result's workload `workload_id` identifies the
 serving deployment, which can outlive a successful run operation. Workload logs
 use `/v1/streams/logs`; monitoring uses `/v1/streams/monitor`. Neither is the job
 feedback stream. Cancellation does not roll back remote effects.

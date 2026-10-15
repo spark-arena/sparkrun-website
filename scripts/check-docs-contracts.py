@@ -317,6 +317,8 @@ def register(v):
         from sparkrun.cli import main as cli
         errors, counts = [], {'python_fences': 0, 'imports': 0, 'options': 0, 'cli_examples': 0}
         option_classes = {name: getattr(api, name) for name in ('RunOptions', 'BenchmarkOptions', 'BuildOptions')}
+        from sparkrun.api.systemd_export import SystemdExportOptions
+        option_classes['SystemdExportOptions'] = SystemdExportOptions
         used_exclusions = set()
 
         def check_python(code, label):
@@ -429,11 +431,11 @@ def register(v):
         # Ensure the parser actually rejects unsupported flags (resilient parsing
         # would silently swallow these errors and give misleading verification).
         try:
-            check_cli('sparkrun update --no-update-registries', 'negative-control')
+            check_cli('sparkrun update --not-a-real-option', 'negative-control')
         except click.NoSuchOption:
             pass
         else:
-            errors.append('Parser accepted removed/unsupported update option')
+            errors.append('Parser accepted an unsupported option')
         expected_exclusions = set(CONFIG['excluded_python_fences']) | set(CONFIG['excluded_cli_examples'])
         if used_exclusions != expected_exclusions:
             errors.append(f'Stale snippet exclusions: {expected_exclusions - used_exclusions}')

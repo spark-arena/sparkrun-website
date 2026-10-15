@@ -27,8 +27,9 @@ print(outcome.success, outcome.benchmark_id, outcome.outputs)
 ```
 
 Select publication hooks with `integrations={"arena": {}}`; the removed `arena`
-option and private CLI wrappers are not supported. Recipe trust is a separate
-boolean. The frontend must explicitly authorize any integration confirmation it
+option and private CLI wrappers are not supported. `trust=True` explicitly
+authorizes recipe hooks; otherwise untrusted hooks use the `recipe_trust`
+decision below. The frontend must explicitly authorize any integration confirmation it
 intends to accept; Arena quality confirmation defaults to declining without a
 handler. Reusing a default decision is not a blanket approval policy.
 
@@ -74,8 +75,12 @@ can propagate after owned cleanup. Interrupts remain interrupts.
 | `resume_incomplete` | Resume | Start fresh | True |
 | `remeasure_complete` | Remeasure | Reuse | False |
 | `integration_confirmation` | Continue | Decline | Integration's explicit default |
+| `recipe_trust` | Authorize all recipe hooks and mods for this launch | Refuse before launch | False |
 
 The first two apply to `AUTO`. Progress callbacks do not make decisions.
+`recipe_trust` is requested only for untrusted hooks when `trust=False`;
+its message lists the hooks. Without a callback it declines. The verdict is
+resolved before preparation or replacement and reused throughout the launch.
 
 ## Scenario progress
 
@@ -100,7 +105,7 @@ not claim the tool evaluator's per-scenario detail.
 ## Results and finalization retry
 
 `BenchmarkResult` includes `success`, `benchmark_id`, framework/profile/category,
-`results`, absolute export paths in `outputs`, host/image provenance, metadata,
+`results`, `workload_id`, absolute export paths in `outputs`, host/image provenance, metadata,
 `resumed`, `already_complete`, and integration outcomes. `run_result` exists only
 when this invocation launched inference. Integrations receive recursively immutable
 measurement/state snapshots; publication retries cannot relabel measured settings.
@@ -151,4 +156,4 @@ Daemon benchmark jobs accept `collect_diagnostics: true`; there is no dedicated
 benchmark CLI flag. See [Diagnostics API](/developer-reference/diagnostics-api/).
 
 For timeout, authentication, framework, and integration contracts see the pinned
-[benchmark guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/BENCHMARK_API.md).
+[benchmark guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/BENCHMARK_API.md).

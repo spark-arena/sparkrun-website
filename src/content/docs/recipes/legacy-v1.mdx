@@ -1,0 +1,84 @@
+---
+title: Legacy v1 Recipes
+description: Reference for existing recipes from eugr's run-recipe launcher and adapting them to the current format.
+---
+
+`recipe_version: "1"` is the legacy format from eugr's `run-recipe` launcher in
+[spark-vllm-docker](https://github.com/eugr/spark-vllm-docker). Sparkrun retains
+compatibility so existing recipes can be loaded and used. New recipes should use
+[format v2](/recipes/format/), which is also the default when `recipe_version`
+is omitted.
+
+## Recognizing a v1 recipe
+
+Older recipes commonly supply a full serve command and eugr-specific build
+settings. This simplified example illustrates the structure:
+
+```yaml
+recipe_version: "1"
+model: Qwen/Qwen3-1.7B
+runtime: vllm
+container: eugr/spark-vllm:latest
+solo_only: true
+defaults:
+  host: 0.0.0.0
+  port: 8000
+  tensor_parallel: 1
+  max_model_len: 8192
+command: |
+  vllm serve {model} \
+    --host {host} --port {port} \
+    -tp {tensor_parallel} --max-model-len {max_model_len}
+```
+
+Image tags, mods, and engine flags in an older recipe still need to match the
+image you run. Format compatibility does not establish engine compatibility.
+
+## Compatibility fields and behavior
+
+| Field or convention | How sparkrun handles it |
+|---|---|
+| `recipe_version: "1"` | Enables legacy recipe compatibility; it is not a required core version |
+| `model`, `container`, `defaults`, `env`, `command` | Load into the shared recipe representation |
+| `runtime: vllm` or an inferred vLLM runtime | Selects the normal vLLM variant; v1 compatibility supplies the eugr builder when no builder is declared |
+| `build_args` | Passed to eugr builder preparation; do not assume every old flag triggers a build |
+| `mods` | Resolved through the shared mod mechanism into preparation hooks |
+| `runtime_config.mods` | Accepted and normalized to top-level `mods` when top-level mods are absent |
+| `solo_only: true` | Single-host constraint; use `max_nodes: 1` in new recipes |
+| `cluster_only: true` | Multi-host constraint; use `min_nodes: 2` in new recipes |
+| `mode: solo` / `mode: cluster` | Older topology declarations; prefer explicit node limits |
+| Doubled literal braces in defaults/commands | Legacy escaping is accepted; v2 examples use ordinary JSON braces |
+| Top-level `description` | Normalized into recipe metadata |
+
+`include:` chains cannot contain v1 recipes. Environment values do not expand
+controller secrets, regardless of recipe version. The current
+[trust rules](/advanced/security/) also apply to legacy hooks and mods.
+
+The eugr builder is now pull-first for supported sentinel images. Some old
+build flags are no-ops, while others request a build. See
+[Builders](/developer-reference/builders/) before retaining build settings from
+an older recipe.
+
+## Adapting an existing recipe
+
+1. Export a separate normalized copy with
+   `sparkrun export recipe old-recipe.yaml --save updated.yaml`. Export normalizes
+   fields but does not itself change a v1 recipe's version to `"2"`.
+2. Set `recipe_version: "2"` and choose the runtime explicitly. Retain
+   `builder: eugr` if the recipe depends on that builder; do not rely on v1
+   inference after changing the version.
+3. Replace old topology fields with `min_nodes` / `max_nodes`, keep mods at the
+   top level, and replace legacy doubled JSON braces with ordinary braces.
+4. Move mapped serving flags into `defaults` using the runtime's
+   [flag reference](/runtimes/overview/#recipes-without-command-templates).
+   Remove `command` once all required settings are mapped. Keep a template for
+   unusual flags that need it.
+5. Validate and inspect the planned launch before using the converted recipe:
+
+```bash
+sparkrun recipe validate updated.yaml
+sparkrun run updated.yaml --cluster mylab --dry-run
+```
+
+Compare effective settings and intended image/model versions with the old
+recipe. A dry run checks the generated plan; it does not prove model readiness.

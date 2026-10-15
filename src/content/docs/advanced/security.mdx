@@ -4,7 +4,7 @@ description: Recipe trust gating, the --trust flag, and what registries imply.
 ---
 
 sparkrun runs shell commands derived from recipes — `pre_exec` inside
-containers, `post_exec` inside containers after a health check,
+containers, `mods` that become pre-launch commands, `post_exec` inside containers after a health check,
 `post_commands` on the **control machine**. Trust gating exists so a recipe
 fetched from a third-party registry can't silently execute arbitrary commands
 when you launch it.
@@ -29,10 +29,12 @@ Trust is a **local** decision recorded in your own
 `~/.config/sparkrun/registries.yaml`. A manifest in the source repository
 cannot grant itself trust.
 
-Otherwise the recipe is **untrusted** and sparkrun prompts before each hook
-surface runs. The same trust decision is shared between `pre_exec`
-(pre-launch) and `post_exec` / `post_commands` (post-launch) — you confirm
-once per recipe per session.
+Otherwise the recipe is **untrusted**. Interactive `run`, `proxy load`, and
+`benchmark` list its hooks and mods and ask once per launch (default **No**),
+before preparation or replacement of an existing deployment. That verdict covers
+`pre_exec`, `mods`, `post_exec`, and `post_commands`. Non-interactive launches
+refuse without explicit authorization. Dry runs report the required trust and
+execute no hooks.
 
 :::danger[URL recipes are never auto-trusted]
 A recipe fetched from a URL — including `@spark-arena/<id>` shortcuts, which
@@ -49,8 +51,10 @@ size cap; an off-allowlist host requires explicit confirmation.
 
 `sparkrun run --trust <recipe>` skips the prompt for any third-party recipe.
 Use it only when you've reviewed the recipe and intend to run its hook
-content. The flag is hidden from `--help` by design: it should be a
-conscious operator override, not the default workflow.
+content and execution settings. It is available in help for `run`, `proxy load`,
+and `benchmark`. Python callers use `trust=True` after authorization; frontends
+can inspect `api.untrusted_hooks(recipe)` first. Benchmarks also support a
+`recipe_trust` decision callback, which defaults to refusal.
 
 ## What trust does NOT cover
 

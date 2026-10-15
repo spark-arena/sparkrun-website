@@ -15,8 +15,8 @@ separately with `sparkrun plugins enable/disable`. The defaults below are for
 ## Managing flags
 
 ```bash
-# What exists, what's on, and why
-sparkrun setup features list
+# All flags, their effective state, and why
+sparkrun setup features list --all
 
 # Turn one on / off explicitly
 sparkrun setup features enable executor.local
@@ -29,8 +29,10 @@ sparkrun setup features reset executor.local
 `list` labels its columns `FEATURE`, `STATE`, `SOURCE`, `OWNER`, and
 `DESCRIPTION`. State is the effective capability value; source explains its
 origin (`env`, `config`, or `channel`), and owner identifies the declaring plugin
-or core. Disabled plugins' static declarations remain discoverable. Setup-step
-flags are omitted unless you use the hidden `--all` option. `--json` includes
+or core. With no subcommand, `setup features` lists enabled flags; `list` does
+the same. Add `--all` to include disabled flags and setup-step flags. Disabled
+plugins' static declarations remain discoverable through that full inventory.
+The enabled-only default also applies to `--json`, which includes
 resolved values, overrides, ownership, and channel information.
 
 :::note

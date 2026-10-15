@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/spark-arena/sparkrun.git",
-  "revision": "cf5e16b9a44079288fd0a712e240d250a3f69b07",
+  "revision": "254d598107b342c6060909881355e8e69e69eb30",
   "version": "0.4.0",
   "status": "release-preparation",
   "python": "3.12",

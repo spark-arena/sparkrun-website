@@ -1,0 +1,80 @@
+---
+title: sparkrun build
+description: Prepare images, model files, tuning configurations, and native environments without starting inference.
+---
+
+`sparkrun build` prepares a recipe's assets for a later `run`. Use it to download
+and distribute models and images, run a builder, or provision a native environment
+before you need to serve the model.
+
+```bash
+sparkrun build my-recipe --cluster mylab
+sparkrun build my-recipe --cluster mylab --dry-run --json
+sparkrun build native-recipe.yaml --hosts localhost --executor local
+```
+
+This advanced command is directly callable. Set `SPARKRUN_ADVANCED=1` to show it
+in top-level help. Docker and local executors are supported; native execution
+and the `uv-venv` builder still require their [feature flags](/advanced/feature-flags/).
+Delegating runtimes and other executors report an unsupported-operation error.
+
+## What build prepares
+
+- Runs the recipe's builder, or stages existing images when there is no builder.
+- Downloads and distributes model repositories, including runtime-declared
+  auxiliary models, using their configured revisions and transfer policies.
+- Stages tuning configurations and verifies expected images on Docker hosts.
+- For `builder: uv-venv`, prepares dependencies and an activation file on each
+  target host, reusing an unchanged environment.
+- Prepares every selected host. Inference node-count limits and GPU occupancy
+  do not shorten the host list.
+
+Use the same recipe and overrides for the eventual `sparkrun run`. Build leaves
+the recipe unchanged and creates no serving job. Model loading, GPU allocation,
+kernel warmup, and launch hooks happen when inference starts. Build does not
+evict workloads or clear the page cache; builders can run temporary preparation
+or probe processes.
+
+Plugins with custom preparation requirements can implement a
+[build preparation hook](/developer-reference/plugin-development/#preparation-and-execution-strategies).
+Launch-strategy hooks do not run during build.
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--hosts` / `-H`, `--hosts-file`, `--cluster` | Select hosts; otherwise use the default cluster |
+| `-o` / `--option KEY=VALUE` | Repeatable recipe overrides |
+| `--image` | Override the image |
+| `--tp`, `--pp`, `--dp` | Set recipe parallelism values used during preparation |
+| `--gpu-mem`, `--max-model-len` | Set recipe memory/context values |
+| `--executor docker\|local` | Select the execution environment to prepare |
+| `--cache-dir` | Model cache on target hosts |
+| `--local-cache-dir` | Model download cache on the control machine |
+| `--offline` / `--online` | Use cached assets or override the cluster's offline policy |
+| `--transfer-mode auto\|local\|push\|delegated\|pull` | Override the cluster transfer mode |
+| `--transfer-interface` | Network interface for resource transfers |
+| `--rebuild` / `--no-rebuild` | Builder rebuild preference or registry-image refresh |
+| `--no-sync-tuning` | Skip registry tuning refresh; existing tuning files are still staged |
+| `--builder-option KEY=VALUE` | Repeatable builder context values |
+| `--trust` | Authorize recipe preparation hooks and host-path overrides |
+| `--dry-run` / `-n` | Preview without running builders or transferring assets |
+| `--json` | Output the preparation result as JSON |
+
+Recipe `cluster_config` cache paths retain their usual precedence over cache
+options. Rebuild behavior depends on the [builder](/developer-reference/builders/).
+
+Offline mode also applies when loading the recipe: it does not fetch a recipe
+URL or refresh registries. Required assets must already be available locally or
+on the selected hosts. Executor settings supplied with `-o`, such as
+`-o entrypoint=''`, configure the executor rather than becoming engine flags.
+
+## Failure and retry
+
+Builder, transfer, tuning-preparation, and image-verification failures return a
+nonzero exit status. Completed downloads and builds remain available for retry.
+A dry run reports intended image references; it does not verify resident images.
+
+Python applications use `BuildOptions`, `plan_build`, and `build`; see
+[Python API](/developer-reference/python-api/). `materialize` resolves a container
+launch specification, while `build` performs asset preparation.

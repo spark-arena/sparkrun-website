@@ -68,7 +68,7 @@ Copyright 2026 Scitrera LLC.
 
 The website is prepared for the 0.4.0 release. Its verification reference is pinned
 in `scripts/docs-contracts.json` to
-`cf5e16b9a44079288fd0a712e240d250a3f69b07`. Update the verification pin and source
+`254d598107b342c6060909881355e8e69e69eb30`. Update the verification pin and source
 links at the release cut. Stable availability and
 portable-daemon platform checks are release gates, not inferred from version text.
 The reference includes domain-based daemon operations, plugin namespaces, shared
@@ -83,7 +83,7 @@ cluster (Python 3.12+):
 
 ```sh
 python3.12 -m venv .venv-docs
-.venv-docs/bin/python -m pip install 'sparkrun @ git+https://github.com/spark-arena/sparkrun.git@cf5e16b9a44079288fd0a712e240d250a3f69b07'
+.venv-docs/bin/python -m pip install 'sparkrun @ git+https://github.com/spark-arena/sparkrun.git@254d598107b342c6060909881355e8e69e69eb30'
 .venv-docs/bin/python scripts/check-docs-contracts.py
 npm run check
 npm run build
@@ -133,9 +133,12 @@ exposes a daemon, or deploys the site. Deployment remains limited to pushes to m
 The page-by-page 0.4.0 review and local verification record is in
 [`scripts/docs-review-0.4.json`](scripts/docs-review-0.4.json).
 
-The expandable operation inventory on **Daemon API** is copied from core's generated
-`docs/DAEMON_API.md` with a Markdown-only tool (no imports or handler execution).
-It includes only the core and bundled Kubernetes sections; external plugin sections
+The expandable operation inventory on **Daemon API** is generated from core's
+`docs/DAEMON_API.md` and the literal `DESCRIPTIONS` map in `daemon/ops.py`.
+Reviewed summaries in `scripts/daemon-operation-descriptions.json` cover operations
+whose upstream descriptions are generic. The tool parses source without importing
+Sparkrun or executing handlers, and rejects missing or stale descriptions.
+It includes only the core and experimental bundled Kubernetes sections; external plugin sections
 are excluded during every sync. Hidden benchmark compatibility arguments are
 omitted from the website tables by the sync tool's explicit omission list:
 

@@ -27,7 +27,7 @@ If no options are given, uses the default cluster.
 
 ## What it shows
 
-- **Running jobs** — workloads grouped by cluster ID, with role (head/worker/solo), host, status, and image
+- **Running jobs** — workloads grouped by workload ID, with role (head/worker/solo), host, status, and image
 - **IP mapping** — when InfiniBand was detected, shows the complementary IP (management or IB) alongside each host so you can identify both addresses
 - **Idle hosts** — hosts with no sparkrun workloads
 - **Pending operations** — active downloads or image distributions that haven't launched containers yet, with elapsed time. These will consume VRAM once launched
@@ -42,7 +42,7 @@ Docker containers — neither is visible to the other's introspection.
 A failing or unreachable observation is not proof that a host or executor
 destination is idle. Review diagnostics before using an incomplete report to
 make placement or teardown decisions. Daemon operation IDs are separate from
-the workload cluster IDs shown here.
+the workload IDs shown here. JSON uses `workload_id` for deployment identity.
 :::
 
 ## Examples

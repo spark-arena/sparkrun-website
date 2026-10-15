@@ -122,7 +122,7 @@ sparkrun stop qwen3-30b-a3b-vllm --tp 2
 ```
 
 :::caution
-If you launched with `--tp 2`, you must also pass `--tp 2` to `stop` and `logs`. This is because the `--tp` value affects the cluster ID that sparkrun uses to identify the job's containers.
+If you launched with `--tp 2`, you must also pass `--tp 2` to `stop` and `logs`. This is because the `--tp` value affects the workload ID that sparkrun uses to identify the job's containers.
 :::
 
 ## Tips

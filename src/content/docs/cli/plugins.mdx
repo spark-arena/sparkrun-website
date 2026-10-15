@@ -16,17 +16,18 @@ See [Managed Plugins](/advanced/plugins/) for trust, storage, and ref policy.
 ## list
 
 ```bash
-sparkrun plugins list --check
+sparkrun plugins list --all --check
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--json` | Metadata, compatibility reasons, loaded state, and load-check results |
-| `--check` | Execute trusted managed plugins in bounded child processes (60 seconds each), including disabled ones |
+| `--all` | Include disabled plugins; the default shows enabled plugins only, also in JSON |
+| `--check` | Execute listed trusted managed plugins in bounded child processes (60 seconds each); use `--all` to include disabled ones |
 
 Without `--check`, listing does not import plugin code. `STATE` is the effective
 loading policy, separate from compatibility and actual loaded state. `FEATURES`
-lists declared flags, including disabled plugins' declarations; `none` means no
+lists declared flags (including disabled plugins when `--all` is used); `none` means no
 separate capability flags and `unavailable` means metadata could not be read.
 Use `setup features list` for effective capability values and ownership. Unknown
 versions are `null` in JSON; unknown/incompatible reasons follow the text table.
@@ -86,7 +87,7 @@ sparkrun plugins add https://github.com/sparksq/sparkrun-sparkroute-plugin --tru
 ```bash
 sparkrun plugins update sparkroute
 sparkrun plugins update --all --dry-run
-sparkrun plugins update sparkroute --ref refs/tags/v0.2.1
+sparkrun plugins update sparkroute --ref refs/tags/v0.3.2
 ```
 
 The tag is an illustrative pin: choose an existing, compatible plugin release.

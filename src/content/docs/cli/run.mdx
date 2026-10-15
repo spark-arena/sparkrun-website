@@ -59,6 +59,7 @@ zeros. See [recipe readiness](/recipes/format/#readiness).
 | `--image` | Override container image (not recommended) |
 | `-o` / `--option` | Override any recipe default: `-o key=value` (repeatable) |
 | `--dry-run` / `-n` | Show what would be done without executing |
+| `--trust` | Authorize recipe hooks, mods, and trust-gated execution settings. See [Security & Trust](/advanced/security/). |
 | `--foreground` | Run in foreground (don't detach) |
 | `--ensure` | Reuse matching launch intent; still wait for readiness |
 | `--no-follow` | Suppress model logs; still wait for readiness |
@@ -154,9 +155,8 @@ Some options are hidden in normal help; use `SPARKRUN_ADVANCED=1 sparkrun run --
 | `--transfer-mode` | Resource transfer mode: `auto`, `local`, `push`, or `delegated` (overrides the cluster setting) |
 | `--collect-diagnostics <path>` | Capture planning, launch, readiness, DEBUG logs, and plugin evidence in a bounded, redacted NDJSON bundle. See [Run Diagnostics](/getting-started/diagnostics/#run-diagnostics). |
 | `--restart <policy>` | Docker restart policy (`no`, `always`, `unless-stopped`, `on-failure[:N]`) |
-| `--trust` | Trust lifecycle hooks from third-party registries without confirmation. See [Security & Trust](/advanced/security/). |
 | `--rebuild` / `--no-rebuild` | Force the builder to produce a fresh image. For `docker-pull`, forces a fresh registry pull; for `eugr`, forces a rebuild or fresh pull according to its build path. Overrides the recipe's `builder_config.rebuild`. |
-| `--container-name` | Override the deterministic cluster ID (i.e. use a static container name) |
+| `--container-name` | Override the deterministic workload ID (i.e. use a static container name) |
 | `--executor-args` | Arguments passed directly to the container executor, e.g. `docker run` (repeatable) |
 | `--ray-port` | Ray GCS port — default 46379 (Ray runtimes only) |
 | `--init-port` | vLLM/SGLang distributed init port — default 25000 |

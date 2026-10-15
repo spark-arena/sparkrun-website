@@ -163,7 +163,7 @@ when a build does happen:
 
 ## Builder plugin interface
 
-Builders extend `BuilderPlugin` (from `sparkrun.builders.base`), an SAF Plugin registered under the `sparkrun.builder` extension point:
+Builders extend `BuilderPlugin` (from `sparkrun.plugins`), an SAF Plugin registered under the `sparkrun.builder` extension point:
 
 | Method | Purpose |
 |---|---|
@@ -180,7 +180,7 @@ Custom builders are scanned from plugin modules. Installed integrations use modu
 Builders may read soft defaults from the user's `~/.config/sparkrun/config.yaml` under `defaults.builders.<builder-name>`:
 
 ```python
-from sparkrun.builders.base import BuilderPlugin
+from sparkrun.plugins import BuilderPlugin
 
 
 class MyBuilder(BuilderPlugin):

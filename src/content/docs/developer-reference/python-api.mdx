@@ -24,7 +24,7 @@ plan = api.plan(options, sctx=sctx)
 print(plan.host_list, plan.notes)  # Render the preview in your frontend.
 # Obtain any required authorization before execution.
 result = api.run(options, sctx=sctx, plan=plan)
-print(result.cluster_id, result.serve_port, result.rc)
+print(result.workload_id, result.serve_port, result.rc)
 ```
 
 Planning can perform transport preparation, hardware discovery, and occupancy
@@ -60,13 +60,57 @@ creates a fresh context view. Passing `sctx` shares cached managers. A fatal
 bootstrap failure requires repairing the cause and restarting the process.
 Cluster-specific SSH settings remain local to the operation.
 
+`api.resolve_sctx(sctx)` reuses a supplied context or resolves the application's
+default one. `api.features`, `api.plugins`, `api.model_cache`, and
+`api.setup.run_setup_steps` accept `sctx=` as well. Occupancy and monitoring calls
+(`status`, `status_report`, `open_telemetry`, `open_live_monitor`, `live_monitor`)
+accept omitted `hosts` and resolve them from the selected cluster or defaults.
+A named or default cluster that cannot be loaded raises `SparkrunError`; it does
+not silently discard that cluster's SSH, executor, transport, or offline settings.
+
 Custom frontends can supply an `ApplicationProfile` to `initialize`. Its stable
 application identity, command/package, update sources, selected integrations,
 and config/cache namespaces determine policy. The controller identity derives
 from a private seed and canonical config directory; it is not a user-selectable
 controller name. Moving/copying the directory changes that identity. Child
 processes inherit the selected profile/config. See the pinned
-[application profile guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/APPLICATION_PROFILES.md).
+[application profile guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/APPLICATION_PROFILES.md).
+
+Use `sparkrun.application.child_environment()` when launching a child process
+that must retain the selected application binding.
+
+## Options and returned types
+
+`RunOptions` and `BuildOptions` accept only `recipe` positionally; pass every
+other option by keyword. They share host/cluster targeting, overrides, trust,
+executor configuration, transfer/cache settings, and `offline`. A build's resolved
+mode is available as `BuildPlan.offline`. Executor keys such as `entrypoint` in
+`overrides` are routed to executor configuration, including for benchmark,
+proxy-load, and realized-export paths.
+
+Import these returned types directly from `sparkrun.api`:
+
+| Types | Used by |
+| --- | --- |
+| `ClusterStatus`, `HostOccupancy`, `RunningWorkload`, `GpuOccupancy` | `status()` occupancy and monitor frames |
+| `ClusterDefinition` | `cluster=` arguments and run/build plans |
+| `SchedulingRequest`, `SchedulingResult` | `schedule()` |
+
+These are aliases of the core classes; additional fields are non-breaking.
+`status_report()` returns a display aggregate whose grouping may change; use
+`status()` for occupancy. Treat `RunResult.launch_result` as opaque: check it only
+for `None`, and pass the whole result to lifecycle helpers. Dry runs, `ensure`
+reuse, and some native handlers return no launch handle. A telemetry session's
+supported operations are `snapshot()` and `close()`. Realized recipe documents
+are the export contract; their `pins` are diagnostic records.
+
+### Experimental surfaces
+
+Pin a compatible Sparkrun version when using `api.workloads`, `api.model_cache`,
+`api.systemd_export`, the lifecycle helpers below, or `api.setup` planning/CX7/SSH
+diagnosis helpers. These may change in a 0.4.x release. The setup runners,
+SSH bootstrap/mesh, identity checks/rotation, and RDMA diagnostics retain their
+separately documented contracts.
 
 ## Task-oriented API map
 
@@ -86,6 +130,9 @@ processes inherit the selected profile/config. See the pinned
 | Model cache | `sparkrun.api.model_cache`: `resolve_manifest`, `inspect_model`, `import_manifest`, `repair_model` |
 | Model-cache retention | `sparkrun.api.model_cache`: `inventory_cache`, `prune_cache`, `pin_revision`, `reconcile_claim` |
 | Gateways | `api.proxy`: lifecycle, model queries, aliases and capability-dependent management |
+| Runtime dialects | `recipe_protocols(recipe)` returns `RecipeProtocols` without planning or host probes |
+| Readiness and endpoint discovery | `wait_ready`, `post_launch`, `discovery_snapshot` (experimental) |
+| Export a systemd service | `api.systemd_export` (experimental) |
 | Benchmarking | `benchmark`, `resume_benchmark`, `BenchmarkOptions`, `BenchmarkResult` |
 
 ### Catalog browse, preview, and retain
@@ -94,8 +141,9 @@ Browse and preview return display payloads. Resolve to a live recipe before laun
 import stages an external recipe, while retain preserves an import for later use.
 Keep source provenance: a path to a staged import does not automatically make it
 a trusted local recipe. Refreshing registries or importing is separate from a
-read-only catalog query. See the pinned
-[catalog guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/CATALOG_API.md)
+read-only catalog query. Listing does not clean up abandoned imports; a new import
+or explicit `cleanup_catalog_imports()` performs that sweep. See the pinned
+[catalog guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/CATALOG_API.md)
 for query/pagination and retain/cleanup examples.
 
 ### Setup plans and execution
@@ -105,7 +153,47 @@ findings before applying steps. Probe/readiness and execution share the step mod
 probing never authorizes mutation. Apply/undo return per-step outcomes and preserve
 recovery manifests. Obtain confirmation and per-host sudo credentials in the
 frontend. See [SSH Setup](/getting-started/ssh-setup/) and the pinned
-[headless setup examples](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
+[headless setup examples](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
+
+The following experimental helpers expose the decisions used by the setup CLI:
+
+| Helper | Contract |
+| --- | --- |
+| `plan_cx7(hosts, *, cluster_name=..., cluster_manager=..., topology="auto", ...)` | Probe and return a read-only `Cx7Plan`; no configuration is applied. Accepts interface/port selection, saved topology, and event/choice callbacks. Three hosts with two physical ports each are ring candidates. |
+| `apply_cx7(plan, *, ssh_kwargs=..., dry_run=..., passwords=..., ...)` | Apply the plan and return per-host results plus topology/interface persistence outcomes. The frontend supplies sudo credentials. |
+| `save_cx7_topology(plan, *, failed=..., dry_run=..., ...)` | Record a complete, successfully applied topology; refuse partial application. |
+| `diagnose_ssh(hosts, user, *, local_user=..., on_event=...)` | Return `SshDiagnosticReport` and per-host diagnoses. Requires OpenSSH ControlMaster support and may prompt for a password on the controlling terminal; it is not an unattended daemon operation. |
+
+These helpers, including `find_local_public_key` and `validate_cx7_options`, are
+Python-only and do not add daemon operations. Check
+`Cx7ApplyResult.failed` and persistence results before reporting success.
+
+### Export systemd services
+
+`sparkrun.api.systemd_export` separates planning, rendering, and installation:
+
+```python
+import sparkrun.api.systemd_export as systemd_export
+
+service_plan = systemd_export.plan(
+    systemd_export.SystemdExportOptions(
+        recipe="my-recipe.yaml", cluster="mylab", dry_run=True,
+    ),
+    sctx=sctx,
+)
+print(service_plan.recipe_yaml, service_plan.cluster_yaml, service_plan.unit_path)
+```
+
+Select exactly one of `recipe` or `job` (a recorded workload ID). Use
+`locate_host` or the mutating `bootstrap_host`, then `render` to produce
+`SystemdExportArtifacts`. The separate `install_files`, `install_unit`, and
+`start` functions perform installation; `render_uninstall` and `uninstall`
+handle removal. The caller owns confirmation and sudo credentials.
+
+Export preserves the source cluster's full host list and configuration. Placement
+runs when the service starts. Controller-local `env_file` values are resolved at
+export and written into the head node's private cluster file. See
+[export systemd](/cli/export/#export-systemd).
 
 ### Model-cache usage and retention
 
@@ -145,12 +233,81 @@ It does not delete model files or discover inactivity. See
 [Model Cache Management](/advanced/cache-management/#usage-tracking-and-retention) for
 tracking, protection, and host requirements.
 
+## Workload identity and teardown
+
+Use `workload_id` for public API parameters and result fields: `RunPlan`,
+`RunResult`, `StopResult`, `JobInfo`, `BenchmarkResult`, and `IntentMatch` all
+use it. `RunOptions.workload_id_override`, `AmbiguousWorkload.workload_ids`,
+and discovery's `workload_ids` use the same naming. The old public `cluster_id`
+spellings have no aliases.
+
+Core occupancy/executor types such as `RunningWorkload` and `LaunchResult`,
+stored job metadata, benchmark export metadata, and recipe templates still use
+`cluster_id` internally. The daemon projects workload identities as `workload_id`.
+Keep this separate from a saved host-cluster name and from a daemon operation's
+`job_id`.
+
+```python
+preview = api.stop(workload_id=result.workload_id, dry_run=True, sctx=sctx)
+print(preview.workload_id, preview.dry_run, preview.containers_removed)
+```
+
+`stop` and log resolution share target rules. An explicit workload ID wins over
+a recipe selector; hosts come from explicit `hosts`, then recorded job hosts,
+then an explicit cluster. Recipe selectors discover matching launch intent within
+the selected cluster/host scope. Where metadata exists, the recorded cluster
+supplies connection identity, even if the application's default cluster changed.
+Ambiguous recipe matches raise `AmbiguousWorkload`.
+
+A stop preview can contact hosts for discovery but performs no teardown and
+reports zero removed containers. `api.stop_all(hosts=...)` or
+`api.stop_all(cluster=...)` requires an explicit target; it never chooses the
+default cluster on the caller's behalf. The daemon's `workloads.stop_all` follows
+the same rule.
+
+## Readiness, discovery, and external launchers
+
+These lifecycle helpers are experimental:
+
+| Call | Behavior |
+| --- | --- |
+| `wait_ready(result, timeout=..., sctx=...)` | Observe readiness for a launch from this process; requires a launch handle. |
+| `wait_ready(workload_id=..., timeout=..., sctx=...)` | Wait on a recorded workload, including one launched by another process. Uses its recorded recipe, hosts, runtime, port, and connection. Unknown workloads raise `JobNotFound`. |
+| `post_launch(result, readiness=..., sctx=...)` | Run post-serve hooks and honor `stop_after_post`; return `PostLaunchResult` with `.stopped`. Reuses the launch's trust verdict. |
+| `discovery_snapshot(hosts=..., cluster=..., workload_ids=..., sctx=...)` | Observe endpoints with coverage information, using the target cluster's transport and SSH identity. |
+
+Pass exactly one of `result` or `workload_id` to `wait_ready`. `timeout=None` or
+`0` adds no caller budget; configured readiness deadlines and operation
+cancellation still apply. Negative timeouts raise `ValueError`.
+
+`discovery_snapshot(metadata_only=True, workload_ids=..., sctx=...)` considers
+recorded jobs without a cluster status sweep or SSH. It still probes HTTP
+endpoints and returns only healthy ones with `mode="metadata"`; do not combine
+this mode with `hosts` or `cluster`. Endpoints include their recorded `recipe_name`.
+Ordinary discovery uses the default cluster/default hosts when omitted, and falls
+back to metadata-only coverage only when no host source exists.
+
+`api.recipe_protocols(recipe, sctx=...)` returns immutable `RecipeProtocols`
+tuples without planning, SSH, or Hub lookups. `protocols` defaults to
+`("openai",)` if the runtime declares none; `capabilities` describes the runtime's
+native capabilities, not the recipe's declared `capabilities:`.
+
+Integrations starting processes outside `api.run` can call
+`replace_intent_deployments(plan, strict=True, include_current=True, sctx=...)`
+after preparation and immediately before starting processes. It replaces only
+matching intent with overlapping placement and returns stopped workload IDs;
+strict mode rejects incomplete discovery or unconfirmed teardown.
+`fresh_workload_id(plan)` returns a copied plan with a new placement token and
+canonical workload ID. Normal `api.run` callers use its existing replacement
+barrier. To revive recorded recipe state without re-resolution, use
+`Recipe.from_state(job.metadata["recipe_state"])` from `sparkrun.plugins`.
+
 ## Logs and diagnostic capture
 
 Use `api.open_log_target(workload_id, ...)` to resolve reusable sources, then read,
 follow, or page their output. `api.logs(workload_id, ...)` is the convenience
-iterator. The logging selector is `workload_id`, whose value is returned by
-`RunResult.cluster_id`; other lifecycle APIs retain their existing names. Keep
+iterator. Public lifecycle APIs and daemon requests/results use `workload_id`,
+including `RunResult.workload_id`. Keep
 `hosts` as the full topology and select one source with `host`, `container`, or
 `source_id`. See [Log Streaming API](/developer-reference/logging-api/) for cancellation,
 finite export, native Kubernetes, and resource changes.
@@ -186,6 +343,14 @@ trust for local recipes and trusted registries; otherwise gated execution raises
 prompts, even with a TTY. A frontend must obtain the user's authorization before
 calling the API. `trust=None` is not a prompting mode.
 
+Call `api.untrusted_hooks(plan.recipe, sctx=sctx)` to obtain the hooks requiring
+authorization: a mapping of `pre_exec`, `mods`, `post_exec`, and `post_commands`
+to command tuples (mod names for `mods`). An empty mapping means no hook consent
+is needed. One verdict covers the whole launch and is decided before preparation
+or eviction. Dry runs report the required trust without executing hooks.
+Benchmark frontends can authorize through the `recipe_trust` decision callback;
+without one the decision defaults to refusal.
+
 Registry-loaded recipes must retain matching source provenance for automatic
 trust. Reload stale recipes or obtain explicit authorization. Plugin source trust
 and recipe-registry trust are separate decisions. See [Security](/advanced/security/).
@@ -209,6 +374,12 @@ For operation events and subscribers see [Feedback](/developer-reference/feedbac
 | --- | --- |
 | `RunOptions(port=9001)` | `RunOptions(recipe="my-recipe", overrides={"port": 9001})` |
 | `RunOptions.diagnostics_path` | Wrap operations with `api.capture_diagnostics`; CLI `--collect-diagnostics` remains |
+| Public `cluster_id`, `cluster_ids`, `cluster_id_override` | `workload_id`, `workload_ids`, `workload_id_override`; no aliases |
+| Positional run/build fields after `recipe` | Keyword-only arguments |
+| `post_launch()` dictionary | `PostLaunchResult.stopped` |
+| Private runtime protocol queries | `api.recipe_protocols(recipe)` |
+| Private recipe-state deserialization | `Recipe.from_state(state)` from `sparkrun.plugins` |
+| Plugin contracts imported from defining modules | Supported exports in `sparkrun.plugins`; operational calls remain in `sparkrun.api` / `sparkrun.application` |
 | `BenchmarkOptions.arena` | `integrations={"arena": {}}` to select it, `{}` for none |
 | Private benchmark prompt/completion hooks | `progress_callback` and `decision_callback` |
 | `sparkrun.arena` | `sparkrun.plugins.sparkarena` |
@@ -220,5 +391,5 @@ For operation events and subscribers see [Feedback](/developer-reference/feedbac
 Use public imports instead of leading-underscore modules. Pin compatible core and
 integration releases together. This Python boundary does not retire saved recipe,
 configuration, or benchmark formats by implication. The full pinned
-[migration guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/DISTRIBUTION_API_MIGRATION.md)
+[migration guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/DISTRIBUTION_API_MIGRATION.md)
 records detailed contract changes.

@@ -262,7 +262,7 @@ sparkrun uses a sparse checkout, so only the declared subdirectories are fetched
 ### Trust model
 
 Recipes can declare shell commands that run before, after, or alongside the
-serve workload: `pre_exec` (inside the container), `post_exec` (inside the
+serve workload: `pre_exec` and `mods` (inside the container before serving), `post_exec` (inside the
 container after a health check), and `post_commands` (on the **control
 machine**). To prevent a third-party registry from silently running arbitrary
 commands, sparkrun gates these hooks with a per-recipe trust flag.
@@ -278,8 +278,10 @@ A recipe is **trusted** (hooks run without prompting) when:
 
 A registry you add yourself is untrusted until you say otherwise.
 
-Otherwise sparkrun prompts before each hook surface runs. Use `--trust` only
-when you've reviewed the recipe and intend to run its hook content.
+Otherwise interactive launches ask once for all hooks and mods, before preparation
+or replacement; non-interactive launches require explicit authorization. Dry runs
+only report the required trust. Use `--trust` after reviewing the recipe's commands
+and execution settings. See [Security & Trust](/advanced/security/).
 
 :::danger[URL recipes are never auto-trusted]
 A recipe fetched from a URL — including `@spark-arena/<id>` links — always

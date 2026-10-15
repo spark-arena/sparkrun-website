@@ -38,7 +38,7 @@ container: scitrera/dgx-spark-vllm:0.16.0-t5
 
 metadata:
   description: NVIDIA Nemotron 3 Nano 30B (upstream NVFP4) -- cluster or solo
-  maintainer: scitrera.ai <open-source-team@scitrera.com>
+  maintainer: user@example.com
   model_params: 30B
   model_dtype: nvfp4
 
@@ -175,87 +175,6 @@ to it. Sparkrun still handles runtime-specific coordination and supported manage
 arguments. `{placeholder}` values come from effective configuration and CLI
 overrides. Substitution is iterative when a value contains another placeholder.
 
-## Recipe inheritance
-
-Use `include:` to make a small variation of a sibling or registry recipe:
-
-```yaml
-# Save beside base.yaml as long-context.yaml.
-include: base
-min_sparkrun_version: "0.4.0"
-defaults:
-  max_model_len: 65536
-metadata:
-  description: A longer-context variant
-```
-
-A base may be a sibling name (`base` or `base.yaml`, without path separators) or
-a qualified registry reference such as `"@official/qwen3-1.7b-vllm"`.
-Underscore-prefixed siblings such as `_common.yaml` can hold shared settings.
-Bases can include other bases, up to eight levels; cycles are rejected.
-URL-fetched and catalog-imported recipes require qualified registry references.
-
-| Inherited value | How the child changes it |
-|---|---|
-| Mappings such as `metadata` | Merge key by key |
-| Individual values in `defaults` or `env` | Replace the entire setting, including a nested JSON object |
-| Scalars and lists, including hooks and mods | Replace the base value |
-| `overrides` | Append child entries after the base entries |
-| Explicit `null` | Delete the inherited key |
-
-Changing `model` drops inherited model metadata. Inherited registry mods keep
-their source registry. Trust follows the least-trusted member of the chain,
-so a local wrapper does not grant trust to a third-party base. Legacy v1 recipes
-cannot participate in includes.
-
-[`export recipe`](/cli/export/) flattens includes by default; `--keep-include`
-preserves the original reference and child settings.
-
-## Conditional overrides
-
-Use `overrides:` for settings that vary with a model's launch layout or hardware:
-
-```yaml
-defaults:
-  max_num_seqs: 8
-  max_model_len: 32768
-overrides:
-  - when: {nodes: 1}
-    defaults: {max_num_seqs: 1}
-  - when: {arch: sm_121, nodes: {gte: 2}}
-    defaults: {max_model_len: 65536}
-  - when: {config: {attention_backend: flashinfer}}
-    env: {MY_ATTENTION_BACKEND: "{config.attention_backend}"}
-```
-
-Each entry can change `defaults`, `env`, or `container`. Conditions within `when`
-must all match. Values accept equality, a list of alternatives, or operators
-`eq`, `ne`, `in`, `not_in`, `gt`, `gte`, `lt`, and `lte`.
-
-| Selector | Matches |
-|---|---|
-| `tp`, `pp`, `dp`, `ep`, `cp` | Resolved parallelism |
-| `nodes`, `gpus_per_node` | Launch host count and GPUs per host |
-| `runtime`, `runtime_family` | Runtime implementation or family |
-| `config: {key: value}` | Configuration before any conditional layer is applied |
-| `platform`, `vendor`, `accelerator`, `arch` | Hardware identity, such as `dgx-spark`, `nvidia`, `gb10`, `sm_121` |
-| `capability` | Accelerator capabilities, such as `unified-memory` |
-| `memory_gb` | Per-accelerator memory in GiB; host RAM for unified-memory devices |
-
-Matching entries apply in order; later entries win. CLI overrides still have
-the highest priority. Conditional layers cannot change `port`,
-`served_model_name`, or parallelism keys. Hardware-wide defaults, such as
-`CUTE_DSL_ARCH`, belong to the platform and usually need no recipe override.
-
-On mixed clusters, placement groups hosts that agree on the hardware conditions
-and selects a compatible group. A layout spanning incompatible groups is
-rejected. Unknown selectors/operators do not match and produce diagnostics.
-`run --dry-run` reports which layers apply; normal workload lookup retains the
-recipe's declared identity for `stop`, `logs`, and `--ensure`.
-
-Use [`export recipe --realize`](/cli/export/#realize-for-selected-hardware) to
-save the effective settings for selected hardware as an ordinary recipe.
-
 ## Topology fields
 
 New recipes should set `min_nodes` and `max_nodes` directly — they're explicit, compose cleanly with CLI overrides, and cover every case the older flags do.
@@ -358,8 +277,10 @@ post_commands:
 :::danger[Hooks execute arbitrary commands]
 `post_commands` runs on **your machine**, not in a container. sparkrun gates
 hooks behind a trust decision: recipes loaded from a local path and recipes
-from the default registries run without prompting; anything else prompts unless
-you pass `--trust`.
+from trusted registries run without prompting. Untrusted hooks and `mods` share
+one authorization decision before preparation or replacement. Interactive launches
+ask once (default No); non-interactive launches require `--trust`. Dry runs only
+report what would need authorization.
 
 Recipes fetched from a URL — including `@spark-arena/<id>` links — are **never**
 auto-trusted. Read [Security & Trust](/advanced/security/) before running a
@@ -489,7 +410,7 @@ Descriptive and VRAM-estimation fields. Does not affect how the workload runs.
 ```yaml
 metadata:
   description: NVIDIA Nemotron 3 Nano 30B (upstream NVFP4)
-  maintainer: scitrera.ai <open-source-team@scitrera.com>
+  maintainer: user@example.com
   model_params: 30B
   model_dtype: nvfp4
 ```
@@ -611,6 +532,91 @@ runtime_config:
 ```
 
 Unknown top-level keys are automatically swept into `runtime_config`.
+
+## Recipe inheritance
+
+Use `include:` to make a small variation of a sibling or registry recipe:
+
+```yaml
+# Save beside base.yaml as long-context.yaml.
+include: base
+min_sparkrun_version: "0.4.0"
+defaults:
+  max_model_len: 65536
+metadata:
+  description: A longer-context variant
+```
+
+A base may be a sibling name (`base` or `base.yaml`, without path separators) or
+a qualified registry reference such as `"@official/qwen3-1.7b-vllm"`.
+Underscore-prefixed siblings such as `_common.yaml` can hold shared settings.
+Bases can include other bases, up to eight levels; cycles are rejected.
+URL-fetched and catalog-imported recipes require qualified registry references.
+
+Foreign-format bases such as `include: "@lil/<Entry>"` are loaded through their
+registered adapter before merging. The adapter must be loaded and its format
+trusted; an unavailable or untrusted format makes the include fail.
+
+| Inherited value | How the child changes it |
+|---|---|
+| Mappings such as `metadata` | Merge key by key |
+| Individual values in `defaults` or `env` | Replace the entire setting, including a nested JSON object |
+| Scalars and lists, including hooks and mods | Replace the base value |
+| `overrides` | Append child entries after the base entries |
+| Explicit `null` | Delete the inherited key |
+
+Changing `model` drops inherited model metadata. Inherited registry mods keep
+their source registry. Trust follows the least-trusted member of the chain,
+so a local wrapper does not grant trust to a third-party base. Legacy v1 recipes
+cannot participate in includes.
+
+[`export recipe`](/cli/export/) flattens includes by default; `--keep-include`
+preserves the original reference and child settings.
+
+## Conditional overrides
+
+Use `overrides:` for settings that vary with a model's launch layout or hardware:
+
+```yaml
+defaults:
+  max_num_seqs: 8
+  max_model_len: 32768
+overrides:
+  - when: {nodes: 1}
+    defaults: {max_num_seqs: 1}
+  - when: {arch: sm_121, nodes: {gte: 2}}
+    defaults: {max_model_len: 65536}
+  - when: {config: {attention_backend: flashinfer}}
+    env: {MY_ATTENTION_BACKEND: "{config.attention_backend}"}
+```
+
+Each entry can change `defaults`, `env`, or `container`. Conditions within `when`
+must all match. Values accept equality, a list of alternatives, or operators
+`eq`, `ne`, `in`, `not_in`, `gt`, `gte`, `lt`, and `lte`.
+
+| Selector | Matches |
+|---|---|
+| `tp`, `pp`, `dp`, `ep`, `cp` | Resolved parallelism |
+| `nodes`, `gpus_per_node` | Launch host count and GPUs per host |
+| `runtime`, `runtime_family` | Runtime implementation or family |
+| `config: {key: value}` | Configuration before any conditional layer is applied |
+| `platform`, `vendor`, `accelerator`, `arch` | Hardware identity, such as `dgx-spark`, `nvidia`, `gb10`, `sm_121` |
+| `capability` | Accelerator capabilities, such as `unified-memory` |
+| `memory_gb` | Per-accelerator memory in GiB; host RAM for unified-memory devices |
+
+Matching entries apply in order; later entries win. CLI overrides still have
+the highest priority. Conditional layers cannot change `port`,
+`served_model_name`, or parallelism keys. Hardware-wide defaults, such as
+`CUTE_DSL_ARCH`, belong to the platform and usually need no recipe override.
+
+On mixed clusters, placement groups hosts that agree on the hardware conditions
+and selects a compatible group. A layout spanning incompatible groups is
+rejected. Unknown selectors/operators do not match and produce diagnostics.
+`run --dry-run` reports which layers apply; normal workload lookup retains the
+recipe's declared identity for `stop`, `logs`, and `--ensure`.
+
+Use [`export recipe --realize`](/cli/export/#realize-for-selected-hardware) to
+save the effective settings for selected hardware as an ordinary recipe.
 
 ## Automatic runtime detection
 

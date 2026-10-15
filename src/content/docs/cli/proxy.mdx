@@ -77,6 +77,9 @@ while model/config operations need the plugin. See [Managed Plugins](/advanced/p
 capabilities. Unsupported management fails explicitly. A saved discovery cluster
 from `start --cluster` persists; `--clear-cluster` returns to following the default.
 
+`sparkrun proxy ui --json` returns the selected gateway's console information as
+JSON when that capability is supported.
+
 ## Quick start
 
 ```bash
@@ -230,6 +233,7 @@ This is intentionally different from `sparkrun run`, which uses exactly the port
 | `--image` | Override container image |
 | `--solo` | Force single-node mode |
 | `--offline` / `--online` | Use cached assets or override the cluster's offline launch policy |
+| `--trust` | Authorize the recipe's hooks, mods, and trust-gated execution settings |
 | `--port` | Override serve port |
 | `--dry-run` / `-n` | Show what would be done without executing |
 

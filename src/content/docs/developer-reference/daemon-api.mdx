@@ -5,7 +5,7 @@ description: HTTP routes, operation arguments, permissions, job and result contr
 
 The daemon exposes authenticated JSON operations and SSE streams over HTTP
 protocol **1** (`/v1`). This reference covers the API bundled with sparkrun:
-**84 core operations** and **8 Kubernetes operations**. Availability depends on
+**84 core operations** and **8 experimental Kubernetes operations**. Availability depends on
 plugin loading policy, capability flags, and the caller's permissions.
 Use the running daemon's `GET /v1/ops` response to discover its supported API.
 
@@ -40,7 +40,7 @@ Its permission and description determine what it does. Only operations declaring
 `cacheable: true` use the short query cache.
 
 HTTP 202 confirms acceptance. It does not mean that the operation succeeded.
-A workload's `cluster_id` identifies a deployment; a daemon `job_id` identifies
+A workload's `workload_id` identifies a deployment; a daemon `job_id` identifies
 one invocation. Benchmark IDs are separate again.
 
 For a cluster-create request with an admin token:
@@ -289,6 +289,20 @@ Use canonical names such as `workloads.run`; retired flat daemon names have no a
 | `model_cache.list` / `model_cache.prune` | Cache-local usage/protection inventory / preview or apply LRU cleanup. |
 | `model_cache.pin` / `model_cache.reconcile` | Retain an immutable revision / explicitly release an inactive workload claim. |
 
+`cluster.observe` and `cluster.report` can omit `hosts` to use the selected
+cluster or configured defaults. `workloads.stop_all` requires explicit `hosts`
+or `cluster`; teardown never chooses a default target. Build operations accept
+`offline`, including during recipe loading.
+
+`discovery.snapshot` accepts `workload_ids` and `metadata_only`. The latter skips
+host resolution and SSH, considers recorded jobs, and still HTTP-probes their
+endpoints; it cannot be combined with `hosts` or `cluster`. Returned endpoints
+include `recipe_name`. Metadata-only or partial coverage does not prove that an
+unobserved workload has stopped.
+
+The Python CX7 planning/application, SSH diagnosis, and systemd-export helpers
+are not daemon operations. Use only operations advertised by `/v1/ops`.
+
 Registry `add` requires name and URL and never grants trust. `trust` requires
 `acknowledge_trust: true`. Each registry action rejects irrelevant fields. Advisory
 snapshots use `/v1/snapshots/discovery.snapshot`, with the same coverage-bearing
@@ -330,6 +344,8 @@ See [Model Cache Management](/advanced/cache-management/#usage-tracking-and-rete
 <details id="benchmarks-resume">
 <summary><code>benchmarks.resume</code> — job / operate</summary>
 
+Resume a saved benchmark by benchmark ID, separate from its daemon job ID.
+
 **POST** `/v1/benchmarks/resume`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -349,6 +365,8 @@ See [Model Cache Management](/advanced/cache-management/#usage-tracking-and-rete
 
 <details id="benchmarks-run">
 <summary><code>benchmarks.run</code> — job / operate</summary>
+
+Launch or reuse inference and execute the selected benchmark framework.
 
 **POST** `/v1/benchmarks/run`
 
@@ -389,6 +407,8 @@ See [Model Cache Management](/advanced/cache-management/#usage-tracking-and-rete
 <details id="catalog-capacity">
 <summary><code>catalog.capacity</code> — job / read</summary>
 
+Inspect a named cluster's hardware, occupancy, and available capacity for recipe placement.
+
 **POST** `/v1/catalog/capacity`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -402,6 +422,8 @@ See [Model Cache Management](/advanced/cache-management/#usage-tracking-and-rete
 <details id="catalog-cleanup">
 <summary><code>catalog.cleanup</code> — job / operate</summary>
 
+Remove abandoned staged recipe imports while preserving retained imports.
+
 **POST** `/v1/catalog/cleanup`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -413,6 +435,8 @@ No arguments. Send `{}`.
 <details id="catalog-clusters">
 <summary><code>catalog.clusters</code> — query / read</summary>
 
+List saved cluster definitions for catalog selection without probing hosts.
+
 **POST** `/v1/catalog/clusters`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -423,6 +447,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-import">
 <summary><code>catalog.import</code> — job / operate</summary>
+
+Stage supplied recipe content for preview and resolution, preserving its imported provenance.
 
 **POST** `/v1/catalog/import`
 
@@ -436,6 +462,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-recipe">
 <summary><code>catalog.recipe</code> — job / read</summary>
+
+Inspect one recipe's configuration, metadata, and validation details, optionally checking its expected revision.
 
 **POST** `/v1/catalog/recipe`
 
@@ -451,6 +479,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-recipes">
 <summary><code>catalog.recipes</code> — query / read</summary>
+
+Browse cached recipe summaries with filters, pagination, and facets; does not refresh registries.
 
 **POST** `/v1/catalog/recipes`
 
@@ -471,6 +501,8 @@ No arguments. Send `{}`.
 <details id="catalog-refresh">
 <summary><code>catalog.refresh</code> — job / operate</summary>
 
+Refresh enabled recipe registries from their remote sources.
+
 **POST** `/v1/catalog/refresh`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -482,6 +514,8 @@ No arguments. Send `{}`.
 <details id="catalog-registries">
 <summary><code>catalog.registries</code> — query / read</summary>
 
+List configured recipe registries and their enabled, stemless, and trust settings.
+
 **POST** `/v1/catalog/registries`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -492,6 +526,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-registries-add">
 <summary><code>catalog.registries.add</code> — job / admin</summary>
+
+Add a named recipe registry from a URL; adding it does not grant trust.
 
 **POST** `/v1/catalog/registries/add`
 
@@ -508,6 +544,8 @@ No arguments. Send `{}`.
 <details id="catalog-registries-disable">
 <summary><code>catalog.registries.disable</code> — job / admin</summary>
 
+Disable a registry while retaining its saved configuration.
+
 **POST** `/v1/catalog/registries/disable`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -520,6 +558,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-registries-enable">
 <summary><code>catalog.registries.enable</code> — job / admin</summary>
+
+Enable a configured recipe registry for discovery and resolution.
 
 **POST** `/v1/catalog/registries/enable`
 
@@ -534,6 +574,8 @@ No arguments. Send `{}`.
 <details id="catalog-registries-remove">
 <summary><code>catalog.registries.remove</code> — job / admin</summary>
 
+Remove a registry from configuration so it no longer participates in recipe discovery.
+
 **POST** `/v1/catalog/registries/remove`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -546,6 +588,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-registries-trust">
 <summary><code>catalog.registries.trust</code> — job / admin</summary>
+
+Grant a registry standing trust for recipe execution after explicit acknowledgement.
 
 **POST** `/v1/catalog/registries/trust`
 
@@ -561,6 +605,8 @@ No arguments. Send `{}`.
 <details id="catalog-registries-untrust">
 <summary><code>catalog.registries.untrust</code> — job / admin</summary>
 
+Revoke a registry's standing trust for recipe execution.
+
 **POST** `/v1/catalog/registries/untrust`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -574,6 +620,8 @@ No arguments. Send `{}`.
 <details id="catalog-retain">
 <summary><code>catalog.retain</code> — job / operate</summary>
 
+Keep a staged imported recipe so later cleanup does not remove it.
+
 **POST** `/v1/catalog/retain`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -586,6 +634,8 @@ No arguments. Send `{}`.
 
 <details id="catalog-search">
 <summary><code>catalog.search</code> — query / read</summary>
+
+Search recipe summaries with simple filters; catalog.recipes provides paginated browsing.
 
 **POST** `/v1/catalog/search`
 
@@ -607,6 +657,8 @@ No arguments. Send `{}`.
 <details id="cluster-create">
 <summary><code>cluster.create</code> — job / admin</summary>
 
+Save a new named cluster with its hosts, description, and optional SSH user.
+
 **POST** `/v1/cluster/create`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -623,6 +675,8 @@ No arguments. Send `{}`.
 <details id="cluster-default">
 <summary><code>cluster.default</code> — job / admin</summary>
 
+Select the default saved cluster, or clear the selection with a null name.
+
 **POST** `/v1/cluster/default`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -635,6 +689,8 @@ No arguments. Send `{}`.
 
 <details id="cluster-delete">
 <summary><code>cluster.delete</code> — job / admin</summary>
+
+Delete a saved cluster definition without stopping its running workloads.
 
 **POST** `/v1/cluster/delete`
 
@@ -649,13 +705,15 @@ No arguments. Send `{}`.
 <details id="cluster-observe">
 <summary><code>cluster.observe</code> — job / read</summary>
 
+Observe raw per-host occupancy and coverage errors.
+
 **POST** `/v1/cluster/observe`
 
 **Reservation:** `auto`. **Operation version:** 1.
 
 | Argument | Type | Required |
 | --- | --- | --- |
-| `hosts` | `string[]` | Yes |
+| `hosts` | `string[]` | No |
 | `cluster` | `string` | No |
 | `executor` | `string` | No |
 
@@ -664,13 +722,15 @@ No arguments. Send `{}`.
 <details id="cluster-report">
 <summary><code>cluster.report</code> — job / read</summary>
 
+Observe occupancy and enrich grouped workload/idle-host results with saved metadata.
+
 **POST** `/v1/cluster/report`
 
 **Reservation:** `auto`. **Operation version:** 1.
 
 | Argument | Type | Required |
 | --- | --- | --- |
-| `hosts` | `string[]` | Yes |
+| `hosts` | `string[]` | No |
 | `cluster` | `string` | No |
 | `executor` | `string` | No |
 
@@ -678,6 +738,8 @@ No arguments. Send `{}`.
 
 <details id="cluster-update">
 <summary><code>cluster.update</code> — job / admin</summary>
+
+Change a saved cluster's hosts, description, or SSH user.
 
 **POST** `/v1/cluster/update`
 
@@ -696,6 +758,8 @@ No arguments. Send `{}`.
 
 <details id="diagnostics-collect">
 <summary><code>diagnostics.collect</code> — job / read</summary>
+
+Collect a bounded diagnostic bundle for configuration, hosts, and optional workload logs.
 
 **POST** `/v1/diagnostics/collect`
 
@@ -717,6 +781,8 @@ No arguments. Send `{}`.
 <details id="discovery-snapshot">
 <summary><code>discovery.snapshot</code> — job / read</summary>
 
+Observe healthy workload endpoints with coverage and errors; metadata-only mode probes recorded endpoints without an SSH sweep.
+
 **POST** `/v1/discovery/snapshot`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -725,7 +791,8 @@ No arguments. Send `{}`.
 | --- | --- | --- |
 | `hosts` | `string[]` | No |
 | `cluster` | `string` | No |
-| `cluster_ids` | `string[]` | No |
+| `workload_ids` | `string[]` | No |
+| `metadata_only` | `boolean` | No |
 
 </details>
 
@@ -733,6 +800,8 @@ No arguments. Send `{}`.
 
 <details id="model_cache-import">
 <summary><code>model_cache.import</code> — job / operate</summary>
+
+Validate and import a supplied model manifest into the selected caches.
 
 **POST** `/v1/model_cache/import`
 
@@ -755,6 +824,8 @@ No arguments. Send `{}`.
 <details id="model_cache-inspect">
 <summary><code>model_cache.inspect</code> — job / read</summary>
 
+Check selected model files against their manifest and report missing, invalid, or unreadable cache content.
+
 **POST** `/v1/model_cache/inspect`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -775,6 +846,8 @@ No arguments. Send `{}`.
 <details id="model_cache-list">
 <summary><code>model_cache.list</code> — job / read</summary>
 
+Inventory tracked model-cache revisions, byte accounting, usage, pins, and active claims.
+
 **POST** `/v1/model_cache/list`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -788,6 +861,8 @@ No arguments. Send `{}`.
 
 <details id="model_cache-pin">
 <summary><code>model_cache.pin</code> — job / operate</summary>
+
+Add or remove a retention pin for an exact model revision on the selected hosts.
 
 **POST** `/v1/model_cache/pin`
 
@@ -807,6 +882,8 @@ No arguments. Send `{}`.
 <details id="model_cache-prune">
 <summary><code>model_cache.prune</code> — job / admin</summary>
 
+Preview or apply age- and budget-based cleanup of eligible model-cache revisions, preserving protected content.
+
 **POST** `/v1/model_cache/prune`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -824,6 +901,8 @@ No arguments. Send `{}`.
 
 <details id="model_cache-reconcile">
 <summary><code>model_cache.reconcile</code> — job / admin</summary>
+
+Release an exact stale cache claim after the caller confirms its workloads are inactive; does not delete model files.
 
 **POST** `/v1/model_cache/reconcile`
 
@@ -843,6 +922,8 @@ No arguments. Send `{}`.
 
 <details id="model_cache-repair">
 <summary><code>model_cache.repair</code> — job / operate</summary>
+
+Acquire or copy missing and invalid model files, then validate the repaired caches.
 
 **POST** `/v1/model_cache/repair`
 
@@ -868,6 +949,8 @@ No arguments. Send `{}`.
 <details id="model_cache-resolve">
 <summary><code>model_cache.resolve</code> — job / read</summary>
 
+Resolve a model and revision into an immutable manifest of the selected files.
+
 **POST** `/v1/model_cache/resolve`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -888,6 +971,8 @@ No arguments. Send `{}`.
 <details id="proxy-add_alias">
 <summary><code>proxy.add_alias</code> — job / admin</summary>
 
+Save an additional public model name pointing at a gateway target.
+
 **POST** `/v1/proxy/add_alias`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -902,6 +987,8 @@ No arguments. Send `{}`.
 <details id="proxy-discovery-ensure">
 <summary><code>proxy.discovery.ensure</code> — query / admin</summary>
 
+Ensure the current gateway generation has a dedicated discovery service and return its daemon job ID.
+
 **POST** `/v1/proxy/discovery/ensure`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -915,6 +1002,8 @@ No arguments. Send `{}`.
 <details id="proxy-discovery-status">
 <summary><code>proxy.discovery.status</code> — query / admin</summary>
 
+Read the gateway discovery service's ownership, scope, and health state.
+
 **POST** `/v1/proxy/discovery/status`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -926,6 +1015,8 @@ No arguments. Send `{}`.
 <details id="proxy-discovery-stop">
 <summary><code>proxy.discovery.stop</code> — query / admin</summary>
 
+Stop the dedicated gateway discovery service without stopping inference workloads.
+
 **POST** `/v1/proxy/discovery/stop`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -936,6 +1027,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-install_service">
 <summary><code>proxy.install_service</code> — job / admin</summary>
+
+Install the persistent proxy systemd service, optionally starting it immediately.
 
 **POST** `/v1/proxy/install_service`
 
@@ -953,6 +1046,8 @@ No arguments. Send `{}`.
 <details id="proxy-list_aliases">
 <summary><code>proxy.list_aliases</code> — query / read</summary>
 
+List saved gateway model aliases without launching a gateway.
+
 **POST** `/v1/proxy/list_aliases`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -963,6 +1058,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-list_gateways">
 <summary><code>proxy.list_gateways</code> — query / read</summary>
+
+List registered gateway providers and their availability.
 
 **POST** `/v1/proxy/list_gateways`
 
@@ -975,6 +1072,8 @@ No arguments. Send `{}`.
 <details id="proxy-models">
 <summary><code>proxy.models</code> — job / read</summary>
 
+Query the running gateway for its registered models.
+
 **POST** `/v1/proxy/models`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -985,6 +1084,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-register_loaded_model">
 <summary><code>proxy.register_loaded_model</code> — job / operate</summary>
+
+Record a loaded recipe and its overrides for gateway discovery; does not launch inference.
 
 **POST** `/v1/proxy/register_loaded_model`
 
@@ -1001,6 +1102,8 @@ No arguments. Send `{}`.
 <details id="proxy-remove_alias">
 <summary><code>proxy.remove_alias</code> — job / admin</summary>
 
+Remove a saved gateway model alias.
+
 **POST** `/v1/proxy/remove_alias`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1013,6 +1116,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-resolve_gateway">
 <summary><code>proxy.resolve_gateway</code> — query / read</summary>
+
+Resolve an explicit or configured gateway provider and validate its availability.
 
 **POST** `/v1/proxy/resolve_gateway`
 
@@ -1027,6 +1132,8 @@ No arguments. Send `{}`.
 <details id="proxy-service_status">
 <summary><code>proxy.service_status</code> — job / admin</summary>
 
+Inspect the proxy systemd unit and optionally retrieve recent journal output.
+
 **POST** `/v1/proxy/service_status`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1040,6 +1147,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-start">
 <summary><code>proxy.start</code> — job / operate</summary>
+
+Discover endpoints, prepare the selected gateway, and start its service and configured discovery backend.
 
 **POST** `/v1/proxy/start`
 
@@ -1066,6 +1175,8 @@ No arguments. Send `{}`.
 <details id="proxy-status">
 <summary><code>proxy.status</code> — job / read</summary>
 
+Inspect the running gateway and its discovery status.
+
 **POST** `/v1/proxy/status`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1076,6 +1187,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-stop">
 <summary><code>proxy.stop</code> — job / operate</summary>
+
+Stop the gateway and its discovery service while leaving inference workloads running.
 
 **POST** `/v1/proxy/stop`
 
@@ -1089,6 +1202,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-sync">
 <summary><code>proxy.sync</code> — job / operate</summary>
+
+Refresh the gateway's model configuration from discovered endpoints, aliases, and optional host filters.
 
 **POST** `/v1/proxy/sync`
 
@@ -1104,6 +1219,8 @@ No arguments. Send `{}`.
 <details id="proxy-uninstall_service">
 <summary><code>proxy.uninstall_service</code> — job / admin</summary>
 
+Remove the installed proxy systemd service, or preview its removal.
+
 **POST** `/v1/proxy/uninstall_service`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1117,6 +1234,8 @@ No arguments. Send `{}`.
 
 <details id="proxy-unregister_loaded_model">
 <summary><code>proxy.unregister_loaded_model</code> — job / operate</summary>
+
+Remove a recipe from saved gateway load tracking; does not itself stop inference.
 
 **POST** `/v1/proxy/unregister_loaded_model`
 
@@ -1133,6 +1252,8 @@ No arguments. Send `{}`.
 <details id="recipes-build">
 <summary><code>recipes.build</code> — job / operate</summary>
 
+Prepare images or native environments and stage recipe assets without starting inference.
+
 **POST** `/v1/recipes/build`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1146,6 +1267,7 @@ No arguments. Send `{}`.
 | `dry_run` | `boolean` | No |
 | `trust` | `boolean` | No |
 | `rebuild` | `boolean` | No |
+| `offline` | `boolean` | No |
 | `executor` | `string` | No |
 | `executor_config` | `object` | No |
 | `cache_dir` | `string` | No |
@@ -1163,6 +1285,8 @@ No arguments. Send `{}`.
 <details id="recipes-plan_build">
 <summary><code>recipes.plan_build</code> — job / read</summary>
 
+Plan environment preparation and asset staging without reserving inference ranks.
+
 **POST** `/v1/recipes/plan_build`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1176,6 +1300,7 @@ No arguments. Send `{}`.
 | `dry_run` | `boolean` | No |
 | `trust` | `boolean` | No |
 | `rebuild` | `boolean` | No |
+| `offline` | `boolean` | No |
 | `executor` | `string` | No |
 | `executor_config` | `object` | No |
 | `cache_dir` | `string` | No |
@@ -1192,6 +1317,8 @@ No arguments. Send `{}`.
 
 <details id="recipes-realize">
 <summary><code>recipes.realize</code> — job / operate</summary>
+
+Plan against the selected cluster and export a pinned, resolved recipe.
 
 **POST** `/v1/recipes/realize`
 
@@ -1221,7 +1348,7 @@ No arguments. Send `{}`.
 | `executor` | `string` | No |
 | `executor_config` | `object` | No |
 | `rootful` | `boolean` | No |
-| `cluster_id_override` | `string` | No |
+| `workload_id_override` | `string` | No |
 | `transfer_interface` | `string` | No |
 | `local_cache_dir` | `string` | No |
 | `sync_tuning` | `boolean` | No |
@@ -1235,6 +1362,8 @@ No arguments. Send `{}`.
 
 <details id="recipes-validate">
 <summary><code>recipes.validate</code> — job / read</summary>
+
+Validate a recipe and its overrides, returning structured issues without launching it.
 
 **POST** `/v1/recipes/validate`
 
@@ -1252,6 +1381,8 @@ No arguments. Send `{}`.
 <details id="setup-ensure_local_key">
 <summary><code>setup.ensure_local_key</code> — job / admin</summary>
 
+Find a usable local SSH key or generate one when requested.
+
 **POST** `/v1/setup/ensure_local_key`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1265,6 +1396,8 @@ No arguments. Send `{}`.
 
 <details id="setup-mesh_ssh_keys">
 <summary><code>setup.mesh_ssh_keys</code> — job / admin</summary>
+
+Distribute public keys to establish SSH access among the selected hosts, or preview the changes.
 
 **POST** `/v1/setup/mesh_ssh_keys`
 
@@ -1283,6 +1416,8 @@ No arguments. Send `{}`.
 <details id="setup-plan">
 <summary><code>setup.plan</code> — job / read</summary>
 
+Probe hosts and produce a hardware-aware setup plan without applying it.
+
 **POST** `/v1/setup/plan`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1297,6 +1432,8 @@ No arguments. Send `{}`.
 <details id="setup-probe_hosts">
 <summary><code>setup.probe_hosts</code> — job / read</summary>
 
+Collect host reachability, hardware, and setup check results without applying fixes.
+
 **POST** `/v1/setup/probe_hosts`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1310,6 +1447,8 @@ No arguments. Send `{}`.
 
 <details id="setup-probe_ssh_access">
 <summary><code>setup.probe_ssh_access</code> — job / read</summary>
+
+Check whether the selected hosts accept SSH using the requested user and key.
 
 **POST** `/v1/setup/probe_ssh_access`
 
@@ -1327,6 +1466,8 @@ No arguments. Send `{}`.
 
 <details id="setup-rdma_test">
 <summary><code>setup.rdma_test</code> — job / operate</summary>
+
+Run the selected RDMA diagnostic suite and return per-link or collective performance results.
 
 **POST** `/v1/setup/rdma_test`
 
@@ -1355,6 +1496,8 @@ No arguments. Send `{}`.
 <details id="setup-run_steps">
 <summary><code>setup.run_steps</code> — job / admin</summary>
 
+Apply selected setup steps with progress, credential prompts, and recovery manifests, or preview them.
+
 **POST** `/v1/setup/run_steps`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1370,6 +1513,8 @@ No arguments. Send `{}`.
 
 <details id="setup-undo">
 <summary><code>setup.undo</code> — job / admin</summary>
+
+Undo eligible setup steps recorded in a named cluster's recovery manifest.
 
 **POST** `/v1/setup/undo`
 
@@ -1388,6 +1533,8 @@ No arguments. Send `{}`.
 <details id="tailscale-down">
 <summary><code>tailscale.down</code> — job / admin</summary>
 
+Disconnect selected hosts from Tailscale, optionally removing the installation.
+
 **POST** `/v1/tailscale/down`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1404,6 +1551,8 @@ No arguments. Send `{}`.
 
 <details id="tailscale-expose">
 <summary><code>tailscale.expose</code> — job / admin</summary>
+
+Configure Tailscale exposure for a cluster endpoint or gateway.
 
 **POST** `/v1/tailscale/expose`
 
@@ -1422,6 +1571,8 @@ No arguments. Send `{}`.
 
 <details id="tailscale-join">
 <summary><code>tailscale.join</code> — job / admin</summary>
+
+Install Tailscale on selected hosts and initiate joining the tailnet with the requested settings.
 
 **POST** `/v1/tailscale/join`
 
@@ -1443,6 +1594,8 @@ No arguments. Send `{}`.
 <details id="tailscale-status">
 <summary><code>tailscale.status</code> — job / read</summary>
 
+Inspect Tailscale installation, connection, and address information on selected hosts.
+
 **POST** `/v1/tailscale/status`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1459,6 +1612,8 @@ No arguments. Send `{}`.
 <details id="workloads-endpoints">
 <summary><code>workloads.endpoints</code> — job / read</summary>
 
+Observe credential-free workload endpoints for the requested binding and report live coverage or metadata-only evidence.
+
 **POST** `/v1/workloads/endpoints`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1467,12 +1622,14 @@ No arguments. Send `{}`.
 | --- | --- | --- |
 | `recipe_revision` | `string` | No |
 | `cluster_candidates` | `string[]` | No |
-| `cluster_id` | `string` | No |
+| `workload_id` | `string` | No |
 
 </details>
 
 <details id="workloads-ensure_ready">
 <summary><code>workloads.ensure_ready</code> — job / operate</summary>
+
+Adopt, recover, or launch an exact recipe revision and return a verified ready endpoint with ownership and effect receipts.
 
 **POST** `/v1/workloads/ensure_ready`
 
@@ -1491,6 +1648,8 @@ No arguments. Send `{}`.
 <details id="workloads-find_intent">
 <summary><code>workloads.find_intent</code> — job / read</summary>
 
+Find an observed running deployment matching a launch intent.
+
 **POST** `/v1/workloads/find_intent`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1506,6 +1665,8 @@ No arguments. Send `{}`.
 <details id="workloads-inventory">
 <summary><code>workloads.inventory</code> — job / read</summary>
 
+List recorded workload ownership, lifecycle state, provider, and permitted actions for the current manager.
+
 **POST** `/v1/workloads/inventory`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1516,6 +1677,8 @@ No arguments. Send `{}`.
 
 <details id="workloads-list">
 <summary><code>workloads.list</code> — query / read</summary>
+
+List saved workload metadata without probing live health.
 
 **POST** `/v1/workloads/list`
 
@@ -1529,6 +1692,8 @@ No arguments. Send `{}`.
 
 <details id="workloads-materialize">
 <summary><code>workloads.materialize</code> — job / operate</summary>
+
+Resolve container launch units from a plan without starting them.
 
 **POST** `/v1/workloads/materialize`
 
@@ -1558,7 +1723,7 @@ No arguments. Send `{}`.
 | `executor` | `string` | No |
 | `executor_config` | `object` | No |
 | `rootful` | `boolean` | No |
-| `cluster_id_override` | `string` | No |
+| `workload_id_override` | `string` | No |
 | `transfer_interface` | `string` | No |
 | `local_cache_dir` | `string` | No |
 | `sync_tuning` | `boolean` | No |
@@ -1572,6 +1737,8 @@ No arguments. Send `{}`.
 
 <details id="workloads-plan">
 <summary><code>workloads.plan</code> — job / read</summary>
+
+Resolve placement and launch settings without launching a workload.
 
 **POST** `/v1/workloads/plan`
 
@@ -1601,7 +1768,7 @@ No arguments. Send `{}`.
 | `executor` | `string` | No |
 | `executor_config` | `object` | No |
 | `rootful` | `boolean` | No |
-| `cluster_id_override` | `string` | No |
+| `workload_id_override` | `string` | No |
 | `transfer_interface` | `string` | No |
 | `local_cache_dir` | `string` | No |
 | `sync_tuning` | `boolean` | No |
@@ -1616,6 +1783,8 @@ No arguments. Send `{}`.
 <details id="workloads-plugins">
 <summary><code>workloads.plugins</code> — job / read</summary>
 
+List plugin inventory and identify enabled, loaded plugins that provide workload lifecycle controls.
+
 **POST** `/v1/workloads/plugins`
 
 **Reservation:** `none`. **Operation version:** 1.
@@ -1627,6 +1796,8 @@ No arguments. Send `{}`.
 <details id="workloads-reconcile">
 <summary><code>workloads.reconcile</code> — job / admin</summary>
 
+Reconcile uncertain effects for an exact workload after verifying its revision, ownership, and placement evidence.
+
 **POST** `/v1/workloads/reconcile`
 
 **Reservation:** `controller`. **Operation version:** 1.
@@ -1637,13 +1808,15 @@ No arguments. Send `{}`.
 | `recipe_revision` | `string` | Yes |
 | `cluster_candidates` | `string[]` | No |
 | `overrides` | `object` | No |
-| `cluster_id` | `string` | Yes |
+| `workload_id` | `string` | Yes |
 | `acknowledge_effects` | `boolean` | Yes |
 
 </details>
 
 <details id="workloads-run">
 <summary><code>workloads.run</code> — job / operate</summary>
+
+Plan and launch a workload, with optional readiness and post-launch hooks.
 
 **POST** `/v1/workloads/run`
 
@@ -1673,7 +1846,7 @@ No arguments. Send `{}`.
 | `executor` | `string` | No |
 | `executor_config` | `object` | No |
 | `rootful` | `boolean` | No |
-| `cluster_id_override` | `string` | No |
+| `workload_id_override` | `string` | No |
 | `transfer_interface` | `string` | No |
 | `local_cache_dir` | `string` | No |
 | `sync_tuning` | `boolean` | No |
@@ -1692,6 +1865,8 @@ No arguments. Send `{}`.
 <details id="workloads-sleep">
 <summary><code>workloads.sleep</code> — job / operate</summary>
 
+Ask the owning lifecycle provider to put an exact workload to sleep when that action is supported.
+
 **POST** `/v1/workloads/sleep`
 
 **Reservation:** `controller`. **Operation version:** 1.
@@ -1702,12 +1877,14 @@ No arguments. Send `{}`.
 | `recipe_revision` | `string` | Yes |
 | `cluster_candidates` | `string[]` | No |
 | `overrides` | `object` | No |
-| `cluster_id` | `string` | Yes |
+| `workload_id` | `string` | Yes |
 
 </details>
 
 <details id="workloads-status">
 <summary><code>workloads.status</code> — job / read</summary>
+
+Ask the lifecycle provider for the current state of an exact workload and record the observation.
 
 **POST** `/v1/workloads/status`
 
@@ -1719,12 +1896,14 @@ No arguments. Send `{}`.
 | `recipe_revision` | `string` | Yes |
 | `cluster_candidates` | `string[]` | No |
 | `overrides` | `object` | No |
-| `cluster_id` | `string` | Yes |
+| `workload_id` | `string` | Yes |
 
 </details>
 
 <details id="workloads-stop">
 <summary><code>workloads.stop</code> — job / operate</summary>
+
+Stop an exact workload and recipe revision with manager ownership checks and durable effect tracking.
 
 **POST** `/v1/workloads/stop`
 
@@ -1736,12 +1915,14 @@ No arguments. Send `{}`.
 | `recipe_revision` | `string` | Yes |
 | `cluster_candidates` | `string[]` | No |
 | `overrides` | `object` | No |
-| `cluster_id` | `string` | Yes |
+| `workload_id` | `string` | Yes |
 
 </details>
 
 <details id="workloads-stop_all">
 <summary><code>workloads.stop_all</code> — job / operate</summary>
+
+Discover and stop all workloads on the given hosts or cluster (one is required; a teardown never defaults its target).
 
 **POST** `/v1/workloads/stop_all`
 
@@ -1749,14 +1930,18 @@ No arguments. Send `{}`.
 
 | Argument | Type | Required |
 | --- | --- | --- |
-| `hosts` | `string[]` | Yes |
+| `hosts` | `string[]` | No |
 | `cluster` | `string` | No |
 | `dry_run` | `boolean` | No |
+
+Provide either `hosts` or `cluster`; this operation does not fall back to the default cluster.
 
 </details>
 
 <details id="workloads-stop_matching">
 <summary><code>workloads.stop_matching</code> — job / operate</summary>
+
+Stop workloads selected by ID, recipe or hosts; no integration-owner guard.
 
 **POST** `/v1/workloads/stop_matching`
 
@@ -1764,7 +1949,7 @@ No arguments. Send `{}`.
 
 | Argument | Type | Required |
 | --- | --- | --- |
-| `cluster_id` | `string` | No |
+| `workload_id` | `string` | No |
 | `recipe` | `string` | No |
 | `hosts` | `string[]` | No |
 | `cluster` | `string` | No |
@@ -1774,6 +1959,8 @@ No arguments. Send `{}`.
 
 <details id="workloads-wake">
 <summary><code>workloads.wake</code> — job / operate</summary>
+
+Ask the owning lifecycle provider to wake an exact workload when that action is supported.
 
 **POST** `/v1/workloads/wake`
 
@@ -1785,11 +1972,13 @@ No arguments. Send `{}`.
 | `recipe_revision` | `string` | Yes |
 | `cluster_candidates` | `string[]` | No |
 | `overrides` | `object` | No |
-| `cluster_id` | `string` | Yes |
+| `workload_id` | `string` | Yes |
 
 </details>
 
-## Bundled Kubernetes plugin
+## Bundled Kubernetes plugin (experimental)
+
+These Kubernetes operations are experimental. Their schemas and behavior may change; pin compatible versions when building clients.
 
 Requires the loaded `k8s` plugin and the requested capability flags.
 
@@ -1797,6 +1986,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 
 <details id="plugins-k8s-cluster_info">
 <summary><code>plugins.k8s.cluster_info</code> — job / operate</summary>
+
+Inspect the selected Kubernetes cluster and optionally pin its kubectl version to the server release.
 
 **POST** `/v1/plugins/k8s/ops/cluster_info`
 
@@ -1813,6 +2004,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 
 <details id="plugins-k8s-configure_service_account">
 <summary><code>plugins.k8s.configure_service_account</code> — job / admin</summary>
+
+Prepare a Kubernetes service account and access configuration, optionally creating its namespace and writing kubeconfig.
 
 **POST** `/v1/plugins/k8s/ops/configure_service_account`
 
@@ -1834,6 +2027,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 <details id="plugins-k8s-ensure_kubectl">
 <summary><code>plugins.k8s.ensure_kubectl</code> — job / admin</summary>
 
+Find and validate kubectl, optionally downloading the requested version.
+
 **POST** `/v1/plugins/k8s/ops/ensure_kubectl`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1848,6 +2043,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 
 <details id="plugins-k8s-jobset_status">
 <summary><code>plugins.k8s.jobset_status</code> — job / operate</summary>
+
+Read a named JobSet's identity, namespace, and status without exposing its full pod specification.
 
 **POST** `/v1/plugins/k8s/ops/jobset_status`
 
@@ -1865,6 +2062,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 <details id="plugins-k8s-kueue_status">
 <summary><code>plugins.k8s.kueue_status</code> — job / operate</summary>
 
+Check whether Kueue and JobSet custom resource definitions are installed on the selected cluster.
+
 **POST** `/v1/plugins/k8s/ops/kueue_status`
 
 **Reservation:** `auto`. **Operation version:** 1.
@@ -1878,6 +2077,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 
 <details id="plugins-k8s-list_nodes">
 <summary><code>plugins.k8s.list_nodes</code> — job / operate</summary>
+
+List Kubernetes nodes, optionally filtering by label selector or GPU availability.
 
 **POST** `/v1/plugins/k8s/ops/list_nodes`
 
@@ -1894,6 +2095,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 
 <details id="plugins-k8s-setup_kueue">
 <summary><code>plugins.k8s.setup_kueue</code> — job / admin</summary>
+
+Check or install Kueue and JobSet components, with optional version selection and dry-run preview.
 
 **POST** `/v1/plugins/k8s/ops/setup_kueue`
 
@@ -1913,6 +2116,8 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 
 <details id="plugins-k8s-stop_jobset">
 <summary><code>plugins.k8s.stop_jobset</code> — job / operate</summary>
+
+Delete a named Kubernetes JobSet and its managed workload resources.
 
 **POST** `/v1/plugins/k8s/ops/stop_jobset`
 
@@ -1934,7 +2139,7 @@ Requires the loaded `k8s` plugin and the requested capability flags.
 | Family | Final result / meaning |
 | --- | --- |
 | Catalog | Bounded recipe listings/facets, registry or cluster arrays, recipe details with stable `source_kind`, normalized overrides, revision, plugin items and issues; refresh/capacity/import mutations have their own schemas. |
-| Planning/execution | Explicit Plan/Run/Build/Benchmark DTOs. Workload `cluster_id` is distinct from the daemon `job_id`. A serialized plan is a preview, not a resumable execution handle. |
+| Planning/execution | Explicit Plan/Run/Build/Benchmark DTOs. Workload `workload_id` is distinct from the daemon `job_id`. A serialized plan is a preview, not a resumable execution handle. |
 | Generic workloads | `ensure_ready`: ready state, exact workload ID, credential-free endpoint, original observation timestamp, adoption flag and shared workload row. Guarded stop: offline state/IDs; selector/all teardown retain their separate Stop/StopAll DTOs. Inventory: recorded state/providers/actions. Control: the same workload row after provider observation/action. Reconcile: ID/state/receipt count. |
 | Discovery | `discovery.snapshot` and `workloads.endpoints`: sweep ID/time, live/metadata mode, hosts/coverage/errors/completeness, safe endpoints. A partial or metadata-only sweep is not authoritative absence. |
 | Proxy | State/models/start/stop/sync/alias/service DTOs; status includes discovery owner/backend/job/scope/health. `proxy.discovery.ensure` returns an existing/new watch job ID, not that watch's result. |
@@ -2090,6 +2295,6 @@ stage, host, counter, and metric fields. Operation-scoped legacy `type: "log"`
 messages also carry `message`. These events describe operation progress, such as
 image transfer or restore; container output uses the log stream.
 
-The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/DAEMON_API.md)
+The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/DAEMON_API.md)
 contains the corresponding operation inventory. The running daemon's discovery and
 OpenAPI schemas remain authoritative for its installed versions and plugins.

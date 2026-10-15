@@ -95,7 +95,7 @@ configured SSH credentials; `--cache-dir` is the target's HF home, not `hub/`.
 # Metadata only, offline and read-only; no recursive cache traversal.
 sparkrun model-cache inspect org/model --revision COMMIT --cache-dir /models/hf
 
-# Resolve authoritative inventory online (plus a small index, at most 16 MiB).
+# Resolve authoritative inventory online (index JSON is bounded at 128 MiB).
 sparkrun model-cache resolve org/model --revision COMMIT --output manifest.json
 
 # Import trusted inventory for an existing/offline cache. Import is not repair.
@@ -204,7 +204,9 @@ successful call can still report `target_met: false`; inspect each host report.
 Pin/reconcile requests preserve the model origin endpoint and reject a mismatch
 with the tracked snapshot. Publication leases cover transfer and validation; loss
 of a lease cancels outstanding work instead of publishing an unprotected result.
-The index metadata size limit applies to index JSON, not model weight files.
+The **128 MiB** index metadata limit applies to index JSON, not model weight files
+or VRAM. Large quantized MoE exports can have many index entries for expert
+weights and scales. An oversized index remains an explicit inventory error.
 
 Only tracked revisions with a known file inventory are eligible. Unknown snapshots,
 unexpected files, pins, busy publication locks, invalid metadata, and active workload

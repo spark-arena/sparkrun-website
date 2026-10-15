@@ -38,10 +38,15 @@ placement changes or when a fresh liveness check is needed.
 Resolution accepts the same workload selectors as `api.logs`: a `workload_id`,
 or a `recipe` plus a host source (`hosts`, `cluster`, or configured defaults).
 `workload_id` takes precedence. Recipe overrides participate in intent discovery.
-The identifier is the value currently returned as `RunResult.cluster_id`; this
-logging API calls it `workload_id` to distinguish a workload from its host cluster.
+The identifier is `RunResult.workload_id`, distinct from its host cluster.
 The Python keyword, `LogTarget` field, and daemon query all use `workload_id`.
-Saved metadata and other lifecycle APIs retain their existing names.
+Public stop, readiness, and workload-management APIs use the same name.
+
+Resolution shares `api.stop`'s target rules. For an ID, explicit `hosts` take
+precedence over recorded job hosts, then an explicit cluster's hosts. Where job
+metadata exists, its recorded cluster supplies connection identity; changing the
+application's default cluster does not redirect the connection. Recipe selectors
+discover matching intent on the selected host scope.
 
 `hosts` describes the **full workload topology**. To inspect one worker, use
 `host=` or `container=` instead of shortening `hosts`; rank and solo/cluster

@@ -16,6 +16,7 @@ contract for every executor or plugin strategy:
 ```text
 Resolve recipe and provenance
   -> plan hosts, hardware, placement, executor destinations
+  -> authorize all hooks and mods for this launch
   -> prepare container or native assets
   -> distribute and verify required resources per host
   -> synchronize applicable tuning/runtime caches
@@ -26,6 +27,11 @@ Resolve recipe and provenance
 CLI `run` and fresh benchmarks share placement/readiness presentation. A live plan
 avoids redundant scheduling; it does not prove that cluster capacity can never
 change between preview and execution. Reservation and ownership checks still apply.
+
+The trust verdict is resolved once before preparation and before the replacement
+barrier can evict an existing deployment. Runtime plugins are shared instances;
+the launcher binds executors on an operation-local copy and passes per-host
+platform environment explicitly to prevent concurrent launches sharing state.
 
 ### Phase 1: Preparing
 

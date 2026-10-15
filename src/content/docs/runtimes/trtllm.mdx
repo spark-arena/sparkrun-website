@@ -50,7 +50,7 @@ launches in MPI and provides coordination settings.
 
 {/* BEGIN RUNTIME FLAGS */}
 
-Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/src/sparkrun/runtimes/trtllm.py).
+Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/trtllm.py).
 
 | Engine flag | Key under `defaults` | Value form |
 |---|---|---|
@@ -71,7 +71,7 @@ Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/c
 
 ## Extra LLM API config
 
-Certain advanced options are passed via a generated `extra-llm-api-config.yml` file rather than CLI flags. When any of these keys appear in recipe `defaults`, sparkrun generates the YAML file, writes it into the container, and passes it via `--extra_llm_api_options`:
+Certain advanced options are passed via a generated `extra-llm-api-config.yml` file rather than CLI flags. When any of these keys appear in effective recipe `defaults` or `-o` overrides, sparkrun generates the YAML file, writes it into the container, and passes it via `--extra_llm_api_options`. This also applies to single-node launches when the recipe itself declares none of these keys:
 
 | Recipe key | Config section | YAML field |
 |---|---|---|

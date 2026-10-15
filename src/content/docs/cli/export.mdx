@@ -89,7 +89,7 @@ sparkrun export running-recipe <target> [options]
 
 Export the effective recipe from a running workload, including all applied overrides baked into defaults. This is useful for capturing the exact configuration of a running inference workload.
 
-`TARGET` can be a recipe name or a cluster ID (the short hex string from `sparkrun status` output).
+`TARGET` can be a recipe name or a workload ID (the short hex string from `sparkrun status` output).
 
 ### Options
 
@@ -104,7 +104,7 @@ Export the effective recipe from a running workload, including all applied overr
 ### Examples
 
 ```bash
-# Export by cluster ID (from sparkrun status)
+# Export by workload ID (from sparkrun status)
 sparkrun export running-recipe e5f6a7b8
 
 # Export by recipe name (requires host/cluster info)
@@ -129,7 +129,17 @@ sparkrun export systemd <target> --cluster <name> [options]
 
 Generate a systemd service for running a sparkrun inference workload persistently on the head node of a cluster. The service wraps `sparkrun run` with `--foreground`, giving you journald log integration, `systemctl` status monitoring, and automatic restart on failure.
 
-`TARGET` can be a recipe name (with optional overrides) or a cluster ID (from a running workload).
+`TARGET` can be a recipe name (with optional overrides) or a workload ID.
+
+The exported cluster retains the source cluster's full host list, SSH user,
+executor, transport, scheduler, and other settings. Placement happens on each
+service start. Controller-local `env_file` values are resolved during export and
+written into the head node's owner-only cluster file. Service names and SSH users
+are validated; an omitted SSH user falls back to the local login.
+
+Python frontends can use the experimental
+[`api.systemd_export` helpers](/developer-reference/python-api/#export-systemd-services)
+to plan, render, and install these artifacts separately.
 
 ### Options
 
@@ -190,7 +200,7 @@ This stops the service, disables it, removes the unit file, and cleans up servic
 
 ### From a running workload
 
-You can generate a systemd service from an already-running workload using its cluster ID:
+You can generate a systemd service from an already-running workload using its workload ID:
 
 ```bash
 sparkrun export systemd e5f6a7b8 --install --start

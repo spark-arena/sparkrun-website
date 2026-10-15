@@ -9,7 +9,7 @@ description: Update channels, self-upgrade behavior, and the anonymous telemetry
 sparkrun update
 ```
 
-This upgrades core when installed as a uv tool, reconciles compatible trusted managed plugins, and refreshes recipe registries. `sparkrun setup update` additionally accepts `--no-update-registries`; the top-level command does not. Both accept `--no-update-plugins`.
+This upgrades core when installed as a uv tool, reconciles compatible trusted managed plugins, and refreshes recipe registries. `sparkrun setup update` is the same command. Both accept `--no-update-registries` and `--no-update-plugins`, and both exit nonzero when the core upgrade fails.
 
 If sparkrun was installed some other way — `pip`, `pipx`, or an editable
 checkout — the core self-upgrade step is skipped; plugin reconciliation and registry refresh still apply.
@@ -25,8 +25,8 @@ The opt-out still audits local compatibility, including disabled/unmanaged plugi
 but fetches no plugin revisions and does not report remote update availability.
 Unmanaged sources are never rewritten. Incompatible/unknown candidates and failed
 load checks leave active generations intact. Other updates continue after a
-failure: core-update warnings can be nonfatal, while explicit `plugins update`
-reports partial failure with a nonzero status. Failed/unverifiable core upgrades
+failure: explicit `plugins update` reports partial failure with a nonzero status.
+Failed/unverifiable core upgrades
 permit an audit only. See [Managed Plugins](/advanced/plugins/) for pins and rollback.
 
 Stop/drain daemon and worker leases before replacing their interpreter environment;

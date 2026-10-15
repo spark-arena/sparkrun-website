@@ -303,7 +303,7 @@ workload's manager credential:
 ```bash
 sparkrun daemon --url https://controller:8443 --token-file /private/sparkroute.token \
   call workloads.reconcile --data \
-  '{"recipe":"@registry/recipe","recipe_revision":"REVISION","cluster_id":"WORKLOAD_ID","acknowledge_effects":true}' --wait
+  '{"recipe":"@registry/recipe","recipe_revision":"REVISION","workload_id":"WORKLOAD_ID","acknowledge_effects":true}' --wait
 ```
 
 Reconciliation checks complete placement evidence and matching live identity;
@@ -342,7 +342,7 @@ Storage has not been migrated wholesale to SQLite:
 | Model-cache usage, pins, and workload claims | `HF_HOME/.sparkrun-model-artifacts/usage/` on each cache host | Preparation, confirmed stop, and model-cache management APIs |
 | Configuration, cluster definitions, benchmark state | Existing YAML/JSON files | Existing core APIs |
 
-A daemon `job_id` identifies an operation invocation. A workload `cluster_id`
+A daemon `job_id` identifies an operation invocation. A workload `workload_id`
 identifies the deployment produced or affected by an operation. For example,
 a daemon `workloads.run` job may finish successfully while the deployed inference service
 keeps running; its result includes the workload identity. `daemon jobs list`
@@ -598,7 +598,7 @@ bridge workers; switching back checks daemon jobs admitted under manager
 placement/provider records remain readable; uncertain effects need reconciliation.
 
 For a separately managed gateway, see the connection descriptor in the
-[source daemon guide](https://github.com/spark-arena/sparkrun/blob/cf5e16b9a44079288fd0a712e240d250a3f69b07/docs/DAEMON.md#gateway-discovery-and-workload-recovery).
+[source daemon guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/DAEMON.md#gateway-discovery-and-workload-recovery).
 
 ## HTTP workflow
 

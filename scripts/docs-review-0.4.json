@@ -1,5 +1,5 @@
 {
-  "review_date": "2026-10-13",
+  "review_date": "2026-10-15",
   "reference": "scripts/docs-contracts.json",
   "release_status": "prepared for 0.4.0 release; publication and portable-platform checks remain release gates",
   "scope": {
@@ -100,7 +100,16 @@
         "src/sparkrun/plugin_lifecycle.py",
         "src/sparkrun/core/plugin_policy.py",
         "src/sparkrun/core/daemon_schema.py",
-        "src/sparkrun/diagnostics/"
+        "src/sparkrun/diagnostics/",
+        "src/sparkrun/plugins/__init__.py",
+        "src/sparkrun/api/_lifecycle.py",
+        "src/sparkrun/api/_resolve.py",
+        "src/sparkrun/api/_models.py",
+        "src/sparkrun/api/systemd_export.py",
+        "src/sparkrun/api/setup/_cx7.py",
+        "src/sparkrun/api/setup/_ssh_diagnose.py",
+        "src/sparkrun/core/launch_env.py",
+        "src/sparkrun/daemon/ops.py"
       ],
       "tests": [
         "tests/test_documentation_contracts.py",
@@ -498,16 +507,16 @@
     }
   ],
   "validation": {
-    "contracts": "35 Python fences, 57 imports, 6 option constructors, 562 CLI examples; all six stable/beta/alpha and advanced off/on combinations pass against cf5e16b9a44079288fd0a712e240d250a3f69b07. Installed fixtures verify lazy/console-free initialization, command callbacks with a stubbed host probe, registry and recipe behavior, benchmark/setup/runtime contracts, literal manifests, lifecycle plan idempotence, plugin diagnostic ownership/redaction, disabled builders, nested capture, and closed reporters. Network and subprocess calls remain denied.",
+    "contracts": "38 Python fences, 64 imports, 7 option constructors and 562 CLI examples pass against 254d598107b342c6060909881355e8e69e69eb30 in all six stable/beta/alpha and advanced off/on combinations. Installed plugin, runtime and diagnostics fixtures pass with network and child processes denied. SystemdExportOptions is now checked; the parser negative control uses a deliberately nonexistent flag because --no-update-registries is supported.",
     "core_documentation_tests": "73 passed during the initial review; behavioral tests listed by group were reviewed, not run against live systems.",
-    "astro": "Type/content check: zero errors, warnings or hints. Production build succeeds.",
-    "links": "7602 internal links/anchors across 71 HTML pages and 68 sidebar entries. Earlier external source/community/license checks are historical. The supplied OCI Relay blog link returned HTTP 200; the lil launcher repository was also read during this update.",
+    "astro": "Type/content check: zero errors, warnings or hints. Production build succeeds. Log: /tmp/sparkrun-latest-api-final.log.",
+    "links": "7629 internal links/anchors across 71 HTML pages and 68 sidebar entries pass. Earlier external source checks remain historical.",
     "browser": "32 checks across eight updated pages at 1440px/390px in light/dark themes: Plugin Development, Diagnostics API, Logging API, Daemon API, Managed Plugins, Feature Flags, Diagnostics, and What\u2019s New. No page overflow or browser errors; verified new anchors, all 92 expandable bundled operations, diagnostic fields, and absence of external plugin coverage in Daemon API. Desktop plugin and mobile diagnostics screenshots inspected. Artifacts: /tmp/sparkrun-docs-review/plugin-sync-browser.json and sync-*.png. Earlier reviews cover the homepage, footer, runtime and cache pages.",
     "limitations": [
       "No live cluster, SSH rotation, plugin acquisition or exposed daemon used for validation.",
       "No deployment performed."
     ],
-    "daemon_api": "All 92 bundled operations (84 core, 8 Kubernetes) match the pinned inventory, with the two hidden benchmark failure-policy arguments intentionally omitted from website tables. The generator comparison verifies that no other fields are removed. Internal proxy.serve/watch no longer appear as public operations; diagnostics.collect and collect_diagnostics arguments added. Added artifact route, workload_id log filters, supported schema vocabulary and result validation. Sync excludes external sections and normalizes the outdated Kubernetes parent-gate sentence to current plugin-loading policy. No daemon or handlers started.",
+    "daemon_api": "92 bundled operations (84 core, 8 experimental Kubernetes) match the pinned generated inventory. Every operation has a description from literal core metadata or a reviewed supplemental summary. Generator rejects missing/stale descriptions, preserves the stop_all hosts-or-cluster requirement, and omits only the two hidden benchmark failure-policy arguments. No handlers or plugins execute during generation.",
     "model_cache": "Reviewed commit 32c519b, MODEL_CACHE.md, CLI/API/daemon declarations, usage tracking and host cleanup implementation, and retention tests. Documented preview defaults, per-cache byte targets, protected content, pinning, claim reconciliation, automatic cleanup and host requirements. No model cache was pruned or otherwise changed during validation.",
     "plugin_development": "Reviewed recent commits through cf5e16b, including plugin loading controls, static declarations and capability labels, lifecycle plans, shared logging, diagnostic bundles/reporters, and independent DEBUG capture. Website samples are exercised from their actual code fences, including a loader namespace correction found by verification. The committed source snapshot in /tmp was used while upstream work continued; no upstream files were edited and no host probes, acquisition, setup actions, or workloads ran.",
     "arena_cli": "Replaced benchmark submission examples with sparkrun benchmark <recipe> --arena throughout both tutorials and the CLI overview/reference. Arena group guidance covers login/logout/status. Documented standard resume-by-ID for upload retry. All six contract configurations, production build, internal links, and four mobile local-preview pages pass. No authentication, workloads, or uploads performed. Artifacts: /tmp/sparkrun-docs-review/arena-*.txt and arena-browser.json.",
@@ -515,8 +524,27 @@
     "cache_title": "Page title, sidebar, and incoming link labels now read Model Cache Management; the /advanced/cache-management/ route and anchors are preserved. Build/internal links and mobile local preview checked.",
     "gateway_selection": "Reviewed current core cd21f802, plugin manager/lifecycle restrictions, and the installed SparkRoute manifest/selection hook. Install --enable controls loading; explicit capability enable persists gateway selection. Updated the proxy setup and LiteLLM switch-back examples accordingly. Three focused lifecycle regressions pass against the pinned reference, including installation preserving capabilities/selection and explicit feature enable selecting even when already on. All six website contract configurations, build, links, and desktop/mobile local previews pass. No installed plugin state or running gateway was changed.",
     "release_highlights": "Compared v0.3.10 with core cd21f802 and checked additions against the pinned cf5e16b reference. Expanded release highlights for reusable recipes, offline launches and realized exports, build preparation, proxy services, setup reruns, persistent GPU assignments, Docker io_uring defaults, SGLang FP8 tuning, and the lil launcher catalog adapter. Added the requested OCI Relay blog link and removed the unrelated model-cache cross-reference. Updated recipe/export/build/proxy/tune/registry/cluster guides. No upstream code changed.",
-    "runtime_flags": "254 mappings across six runtime references generated and checked from static core flag maps with scripts/sync-runtime-flags.py. Documented special boolean, JSON, alias, topology, and engine-image restrictions. 13 complete defaults-only YAML examples exercised against pure command generation, including vLLM/Ray, SGLang, llama.cpp, TensorRT-LLM, Atlas, and Modular MAX. Include/override/environment-template/version examples also exercised with network and child processes denied. Recipe Format recommends command only for unusual unmapped flags and omits the recipe scheduler field.",
+    "runtime_flags": "254 mappings across 6 runtime pages match the literal maps at 254d598107b342c6060909881355e8e69e69eb30; no mapping changes since the previous pin.",
     "legacy_recipes": "Documented recipe_version with v2 as the default and v1 as legacy eugr run-recipe format. Added a legacy reference and verified its example, v1 builder/runtime/topology resolution, export retaining version 1, and conversion to a defaults-only v2 recipe.",
-    "release_highlights_browser": "30 checks across 15 updated/new pages at 1440px and 390px; HTTP 200, no page overflow or page errors. Verified recipe_version/command headings, supplied OCI Relay and lil links, and visually inspected OCI Relay, recipe command guidance, and Atlas flag presentation. Artifacts: /tmp/sparkrun-docs-review/release-highlights-browser.json and recipe-command-*, whats-new-oci-*, atlas-flags-*, atlas-table-390.png. Local dev preview remains at http://localhost:4324/."
+    "release_highlights_browser": "30 checks across 15 updated/new pages at 1440px and 390px; HTTP 200, no page overflow or page errors. Verified recipe_version/command headings, supplied OCI Relay and lil links, and visually inspected OCI Relay, recipe command guidance, and Atlas flag presentation. Artifacts: /tmp/sparkrun-docs-review/release-highlights-browser.json and recipe-command-*, whats-new-oci-*, atlas-flags-*, atlas-table-390.png. Local dev preview remains at http://localhost:4324/.",
+    "latest_api_tests": "54 focused core tests passed: test_stop_dry_run.py, test_workload_target.py, test_api_lifecycle.py, test_run_option_contracts.py, test_plugin_import_surface.py. Temporary state and pytest output under /tmp; no live cluster exercised. Log: /tmp/sparkrun-latest-core-tests.log.",
+    "latest_api_browser": "40 checks: 10 affected pages at 1440px/390px in light/dark themes. All 92 operation descriptions and the experimental Kubernetes labels verified; no page overflow or page errors. Expanded operation, mobile Kubernetes, and mobile Python API screenshots inspected. Recipe section order preserved. Artifacts: /tmp/sparkrun-docs-review/api-update-browser.json and latest-*.png."
+  },
+  "latest_commit_review": {
+    "branch": "develop-next",
+    "from_revision": "cf5e16b9a44079288fd0a712e240d250a3f69b07",
+    "through_revision": "254d598107b342c6060909881355e8e69e69eb30",
+    "commit_count": 84,
+    "method": "Reviewed the full commit history, changed upstream documentation and changelog, public declarations and handlers, and focused API tests; reconciled website guidance and pinned source references.",
+    "changes": [
+      "Public workload_id naming; shared stop/log targeting; explicit stop_all scope; keyword-only run/build options; sctx support and returned-type stability tiers.",
+      "Readiness by recorded workload ID, PostLaunchResult, metadata-only discovery, recipe protocols/state restoration, external-launch replacement helpers, CX7/SSH diagnosis and systemd export APIs.",
+      "Supported sparkrun.plugins imports, shared conflict policy, setup facade imports, runtime operation-local state, environment ordering and new runtime hooks.",
+      "All 92 bundled daemon operations regenerated with per-operation descriptions; Kubernetes explicitly experimental; external plugin operations and hidden benchmark failure-policy arguments remain excluded.",
+      "Enabled-only plugin/feature inventory and --all; unified update options; registry update command; trust for mods before preparation/replacement; dry-run stop; offline build and recipe loading.",
+      "Foreign-format includes, full-cluster systemd exports, effective TRT-LLM extra config, 128 MiB safetensors index limit, and release highlights."
+    ],
+    "preserved_user_edits": "Recipe section order, user@example.com metadata examples, 32768/auto walkthrough defaults, stemless terminology, and existing untracked reference pages retained.",
+    "limits": "Documentation changes only; no core edits, commits, deployment, live inference, remote setup, plugin installation, or daemon service started."
   }
 }
