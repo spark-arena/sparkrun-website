@@ -273,7 +273,7 @@ Use canonical names such as `workloads.run`; retired flat daemon names have no a
 | --- | --- |
 | `/v1/jobs` | Durable daemon invocation history, prompts, results and events. |
 | `workloads.list` | Saved deployment metadata; does not probe current health. |
-| `workloads.inventory` | Recorded provider lifecycle/ownership/action inventory. |
+| `workloads.inventory` | Recorded provider lifecycle/ownership/action inventory, including unfinished activations and a completeness flag. |
 | `cluster.observe` / `cluster.report` | Raw host occupancy and coverage / grouped, metadata-enriched display report. |
 | `workloads.plan` / `workloads.run` | Resolve placement / launch and optionally await readiness and post-launch hooks. |
 | `workloads.ensure_ready` | Adopt, recover or launch with durable effect receipts and exact revision identity. |
@@ -308,6 +308,22 @@ Registry `add` requires name and URL and never grants trust. `trust` requires
 snapshots use `/v1/snapshots/discovery.snapshot`, with the same coverage-bearing
 result as the corresponding operation. Plugin endpoint projections retain their
 own namespaces and routing-policy fields.
+
+### Workload inventory and revision changes
+
+`workloads.inventory` includes unfinished activations after caller loss and returns
+at most 256 rows. Its `complete` field is false if execution is in flight or the
+inventory exceeds that limit. Treat missing rows as absence only when `complete`
+is true; even a complete inventory describes recorded state, not live health.
+
+`workloads.ensure_ready` can adopt or wake an existing exact revision after its
+source recipe changes. Receipt and ownership checks still apply. Recovery and new
+launches resolve the recipe again and require the requested revision to match.
+
+Proxy discovery status also returns `warnings` separately from `last_error`.
+Warnings describe routing issues following a successful import and do not fail
+the sweep or delay its next normal interval. Safe gateway rejection messages
+appear in `last_error`; unexpected exception details remain class-name-only.
 
 ### Model-cache retention
 
@@ -1665,7 +1681,7 @@ Find an observed running deployment matching a launch intent.
 <details id="workloads-inventory">
 <summary><code>workloads.inventory</code> — job / read</summary>
 
-List recorded workload ownership, lifecycle state, provider, and permitted actions for the current manager.
+List recorded workloads and unfinished activations with ownership, lifecycle actions, and a completeness flag.
 
 **POST** `/v1/workloads/inventory`
 
@@ -2140,7 +2156,7 @@ Delete a named Kubernetes JobSet and its managed workload resources.
 | --- | --- |
 | Catalog | Bounded recipe listings/facets, registry or cluster arrays, recipe details with stable `source_kind`, normalized overrides, revision, plugin items and issues; refresh/capacity/import mutations have their own schemas. |
 | Planning/execution | Explicit Plan/Run/Build/Benchmark DTOs. Workload `workload_id` is distinct from the daemon `job_id`. A serialized plan is a preview, not a resumable execution handle. |
-| Generic workloads | `ensure_ready`: ready state, exact workload ID, credential-free endpoint, original observation timestamp, adoption flag and shared workload row. Guarded stop: offline state/IDs; selector/all teardown retain their separate Stop/StopAll DTOs. Inventory: recorded state/providers/actions. Control: the same workload row after provider observation/action. Reconcile: ID/state/receipt count. |
+| Generic workloads | `ensure_ready`: ready state, exact workload ID, credential-free endpoint, original observation timestamp, adoption flag and shared workload row. Guarded stop: offline state/IDs; selector/all teardown retain their separate Stop/StopAll DTOs. Inventory: recorded state/providers/actions and `complete`. Control: the same workload row after provider observation/action. Reconcile: ID/state/receipt count. |
 | Discovery | `discovery.snapshot` and `workloads.endpoints`: sweep ID/time, live/metadata mode, hosts/coverage/errors/completeness, safe endpoints. A partial or metadata-only sweep is not authoritative absence. |
 | Proxy | State/models/start/stop/sync/alias/service DTOs; status includes discovery owner/backend/job/scope/health. `proxy.discovery.ensure` returns an existing/new watch job ID, not that watch's result. |
 | Setup/network/cache/Kubernetes | Operation-specific result schemas; some are maps/arrays or booleans, not a universal envelope. Check `/v1/ops` rather than guessing from operation name. |
@@ -2295,6 +2311,6 @@ stage, host, counter, and metric fields. Operation-scoped legacy `type: "log"`
 messages also carry `message`. These events describe operation progress, such as
 image transfer or restore; container output uses the log stream.
 
-The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/DAEMON_API.md)
+The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/DAEMON_API.md)
 contains the corresponding operation inventory. The running daemon's discovery and
 OpenAPI schemas remain authoritative for its installed versions and plugins.

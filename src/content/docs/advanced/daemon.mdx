@@ -269,6 +269,12 @@ including SparkRoute. Use `workloads.run` to launch, `workloads.ensure_ready` to
 adopt, recover, or launch an exact recipe revision, and `workloads.inventory` to
 inspect recorded ownership, provider state, and permitted actions.
 
+Inventory includes unfinished activation records after a caller is lost. Its
+`complete` flag is false during in-flight execution or when the 256-row response
+limit omits records; only a complete response can support absence decisions.
+An exact recorded workload can be adopted or woken even after its source recipe
+changes. Recovery or a new launch still requires the requested recipe revision.
+
 The credential grants a stable workload **manager**. Ordinary calls use `daemon`;
 SparkRoute uses `sparkroute`. `/v1/info` reports the current manager, and accepted
 jobs retain it through execution and API restart. Request arguments and
@@ -564,7 +570,9 @@ submitting raw service operations. `proxy.watch` and `proxy.serve` are internal
 executors with no public alias or submission path.
 
 Discovery status reports the backend, generation/job, scope, last attempt, last
-complete successful observation, last application, and sanitized error. `running`
+complete successful observation, last application, sanitized error, and routing
+warnings. Warnings from a successful import do not fail the sweep or delay its
+normal interval. `running`
 means the loop is active. Metadata-only or partial coverage cannot prove absence
 on an unobserved host, and a failed configuration update does not advance removal
 grace. An uncertain or dead owner requires explicit stop/restart.
@@ -574,14 +582,19 @@ For SparkRoute's HTTP/SSE client, select daemon transport in `proxy.yaml`:
 ```yaml
 proxy:
   gateway: sparkroute
-  gateway_transport: daemon
   discovery_backend: daemon
   discover_interval: 30
   discover_removal_grace_sweeps: 2
+
+gateways:
+  sparkroute:
+    transport: daemon
 ```
 
-`gateway_transport` defaults to `bridge`. Selecting daemon transport defaults
-discovery to daemon unless a backend was explicitly saved. The plugin checks
+`gateways.sparkroute.transport` defaults to `bridge`. With SparkRoute selected,
+daemon transport defaults discovery to daemon unless a backend was explicitly
+saved. These settings do not affect another selected gateway. Legacy locations
+are not read or migrated. The plugin checks
 that the host operations and gateway binary support the selected transport;
 use compatible host, plugin, and gateway versions. An uncertain mutation never
 triggers an automatic fallback to the bridge.
@@ -598,7 +611,7 @@ bridge workers; switching back checks daemon jobs admitted under manager
 placement/provider records remain readable; uncertain effects need reconciliation.
 
 For a separately managed gateway, see the connection descriptor in the
-[source daemon guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/DAEMON.md#gateway-discovery-and-workload-recovery).
+[source daemon guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/DAEMON.md#gateway-discovery-and-workload-recovery).
 
 ## HTTP workflow
 

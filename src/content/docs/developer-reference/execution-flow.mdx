@@ -108,6 +108,10 @@ not the detached deployment. See [run](/cli/run/#readiness-and-exit-status).
 
 ## Runtime orchestration internals
 
+Recipes should use `runtime: vllm` with `defaults.distributed_executor_backend`
+omitted or set to `mp` for native distributed execution, or set to `ray` for Ray.
+The names below identify the concrete implementations selected by that alias.
+
 ### vllm-distributed multi-node
 
 `vllm-distributed` uses vLLM's built-in multi-node support. Each node runs the full `vllm serve` command with node-specific arguments:

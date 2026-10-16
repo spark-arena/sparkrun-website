@@ -74,6 +74,12 @@ connection settings. Completed containers remain readable while their logs exist
 previous instances. A replaced pod or restarted container requires a fresh read;
 following does not automatically attach to replacements.
 
+For interactive browsing, use
+[`sparkrun cluster monitor`](/cli/cluster-commands/#interactive-workload-logs).
+Its log viewer supports regex search, runtime colorization, source scopes, older
+history, and complete file exports.
+
 Python and daemon clients additionally support host/container/source filters,
 reusable targets, and cancellable readers. Python callers can page older history;
-see [Log Streaming API](/developer-reference/logging-api/).
+`LogTarget.dump()` exports complete logs with cancellation cleanup and atomic
+publication. See [Log Streaming API](/developer-reference/logging-api/).

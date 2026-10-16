@@ -21,8 +21,8 @@ does not change host configuration, and never uploads the file automatically.
 # Diagnose all hosts in a cluster
 sparkrun setup diagnose --cluster mylab
 
-# Diagnose specific hosts
-sparkrun setup diagnose --hosts 192.168.11.13,192.168.11.14
+# Diagnose a saved subgroup
+sparkrun setup diagnose --cluster pair-a
 
 # Custom output file
 sparkrun setup diagnose --cluster mylab -o my_diagnostics.ndjson

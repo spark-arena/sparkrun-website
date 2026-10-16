@@ -1,10 +1,10 @@
 {
-  "review_date": "2026-10-15",
+  "review_date": "2026-10-16",
   "reference": "scripts/docs-contracts.json",
   "release_status": "prepared for 0.4.0 release; publication and portable-platform checks remain release gates",
   "scope": {
     "existing_pages": 53,
-    "new_pages": 16
+    "new_pages": 18
   },
   "review_groups": {
     "getting-started": {
@@ -301,6 +301,11 @@
       "status": "reviewed-updated"
     },
     {
+      "page": "clusters/recommended-setups.mdx",
+      "group": "clusters",
+      "status": "added"
+    },
+    {
       "page": "clusters/status.mdx",
       "group": "clusters",
       "status": "reviewed-updated"
@@ -504,13 +509,18 @@
       "page": "tutorials/spark-arena.mdx",
       "group": "tutorials",
       "status": "reviewed-updated"
+    },
+    {
+      "page": "tutorials/tool-call-benchmarking.mdx",
+      "group": "tutorials",
+      "status": "added"
     }
   ],
   "validation": {
-    "contracts": "38 Python fences, 64 imports, 7 option constructors and 562 CLI examples pass against 254d598107b342c6060909881355e8e69e69eb30 in all six stable/beta/alpha and advanced off/on combinations. Installed plugin, runtime and diagnostics fixtures pass with network and child processes denied. SystemdExportOptions is now checked; the parser negative control uses a deliberately nonexistent flag because --no-update-registries is supported.",
+    "contracts": "All six stable/beta/alpha x advanced 0/1 configurations pass: 38 Python fences, 60 imports, 6 option constructors, 587 CLI examples. Installed plugin/runtime/diagnostic fixtures pass with network and child processes denied. Latest logs: /tmp/sparkrun-vllm-alias-contracts-*.log.",
     "core_documentation_tests": "73 passed during the initial review; behavioral tests listed by group were reviewed, not run against live systems.",
-    "astro": "Type/content check: zero errors, warnings or hints. Production build succeeds. Log: /tmp/sparkrun-latest-api-final.log.",
-    "links": "7629 internal links/anchors across 71 HTML pages and 68 sidebar entries pass. Earlier external source checks remain historical.",
+    "astro": "Type/content check: zero errors, warnings or hints. Production build succeeds. Latest log: /tmp/sparkrun-vllm-alias-build.log.",
+    "links": "8023 internal links/anchors across 73 HTML pages and 70 sidebar entries pass. External link reachability remains outside offline verification.",
     "browser": "32 checks across eight updated pages at 1440px/390px in light/dark themes: Plugin Development, Diagnostics API, Logging API, Daemon API, Managed Plugins, Feature Flags, Diagnostics, and What\u2019s New. No page overflow or browser errors; verified new anchors, all 92 expandable bundled operations, diagnostic fields, and absence of external plugin coverage in Daemon API. Desktop plugin and mobile diagnostics screenshots inspected. Artifacts: /tmp/sparkrun-docs-review/plugin-sync-browser.json and sync-*.png. Earlier reviews cover the homepage, footer, runtime and cache pages.",
     "limitations": [
       "No live cluster, SSH rotation, plugin acquisition or exposed daemon used for validation.",
@@ -524,27 +534,51 @@
     "cache_title": "Page title, sidebar, and incoming link labels now read Model Cache Management; the /advanced/cache-management/ route and anchors are preserved. Build/internal links and mobile local preview checked.",
     "gateway_selection": "Reviewed current core cd21f802, plugin manager/lifecycle restrictions, and the installed SparkRoute manifest/selection hook. Install --enable controls loading; explicit capability enable persists gateway selection. Updated the proxy setup and LiteLLM switch-back examples accordingly. Three focused lifecycle regressions pass against the pinned reference, including installation preserving capabilities/selection and explicit feature enable selecting even when already on. All six website contract configurations, build, links, and desktop/mobile local previews pass. No installed plugin state or running gateway was changed.",
     "release_highlights": "Compared v0.3.10 with core cd21f802 and checked additions against the pinned cf5e16b reference. Expanded release highlights for reusable recipes, offline launches and realized exports, build preparation, proxy services, setup reruns, persistent GPU assignments, Docker io_uring defaults, SGLang FP8 tuning, and the lil launcher catalog adapter. Added the requested OCI Relay blog link and removed the unrelated model-cache cross-reference. Updated recipe/export/build/proxy/tune/registry/cluster guides. No upstream code changed.",
-    "runtime_flags": "254 mappings across 6 runtime pages match the literal maps at 254d598107b342c6060909881355e8e69e69eb30; no mapping changes since the previous pin.",
+    "runtime_flags": "262 mappings across six runtime pages match 0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c. Eight vLLM mappings added; all 17 B12X-only keys are in a separate second table, with disable_custom_all_reduce retained in the standard table. Generator check and browser assertions pass.",
     "legacy_recipes": "Documented recipe_version with v2 as the default and v1 as legacy eugr run-recipe format. Added a legacy reference and verified its example, v1 builder/runtime/topology resolution, export retaining version 1, and conversion to a defaults-only v2 recipe.",
     "release_highlights_browser": "30 checks across 15 updated/new pages at 1440px and 390px; HTTP 200, no page overflow or page errors. Verified recipe_version/command headings, supplied OCI Relay and lil links, and visually inspected OCI Relay, recipe command guidance, and Atlas flag presentation. Artifacts: /tmp/sparkrun-docs-review/release-highlights-browser.json and recipe-command-*, whats-new-oci-*, atlas-flags-*, atlas-table-390.png. Local dev preview remains at http://localhost:4324/.",
-    "latest_api_tests": "54 focused core tests passed: test_stop_dry_run.py, test_workload_target.py, test_api_lifecycle.py, test_run_option_contracts.py, test_plugin_import_surface.py. Temporary state and pytest output under /tmp; no live cluster exercised. Log: /tmp/sparkrun-latest-core-tests.log.",
-    "latest_api_browser": "40 checks: 10 affected pages at 1440px/390px in light/dark themes. All 92 operation descriptions and the experimental Kubernetes labels verified; no page overflow or page errors. Expanded operation, mobile Kubernetes, and mobile Python API screenshots inspected. Recipe section order preserved. Artifacts: /tmp/sparkrun-docs-review/api-update-browser.json and latest-*.png."
+    "latest_api_tests": "493 focused core tests passed for log readers/exports, monitor behavior, LiteLLM routing, proxy config/discovery, workload inventory/revision handling, dotted overrides, hybrid KV sizing and vLLM flag/drafter handling. Temporary state under /tmp; core checkout remains clean. Log: /tmp/sparkrun-oct16-core-tests.log.",
+    "latest_api_browser": "56 checks across 14 affected pages at 1440px/390px in light/dark themes. Verified split standard/B12X tables, benchmark commands before results, cluster recommendations, 92 operation descriptions and recipe section order; no page overflow or browser errors. Desktop tool-call tutorial, mobile cluster guide and mobile B12X screenshots inspected. Artifacts: /tmp/sparkrun-docs-review/oct16-browser.json and oct16-*.png. The browser script was corrected to exclude Astro dev-toolbar headings from its page-title locator.",
+    "benchmark_tutorials": "Performance and tool-call tutorials now start with executable benchmarks, then interpretation, tuning, file outputs and recovery. Tool evaluator args/results checked against bundled v2.8.0 adapter. Existing performance URL preserved, sidebar and links updated; Python automation remains in Benchmark API.",
+    "cluster_guidance": "Added recommended logical groupings for 1/2/4/8-node installations. Default includes every node; 4-node installations add two pairs; 8-node installations add four pairs and two quads. Single-node and overlapping groups are explicit; normal placement remains default. Routine quick-start/setup/run/benchmark/tuning/recipe examples use saved clusters, while host definitions/bootstrap and exact API contracts retain hosts. Executable snippets audited to contain no --solo or solo=True.",
+    "vllm_backend_recommendation": "Recommend runtime: vllm throughout runtime comparison, vLLM guide, recipe format/walkthrough, tuning, executor and execution-flow docs. Select mp/ray using defaults.distributed_executor_backend; omitted defaults to native distributed/mp for generated-command recipes. Concrete names remain implementation references. Added YAML and per-launch override examples; legacy command Ray hints remain documented. Nine focused resolver tests pass; all six contracts and 16 desktop/mobile light/dark browser checks pass. Artifacts: /tmp/sparkrun-vllm-alias-tests.log and /tmp/sparkrun-docs-review/vllm-alias-browser.json."
   },
   "latest_commit_review": {
     "branch": "develop-next",
-    "from_revision": "cf5e16b9a44079288fd0a712e240d250a3f69b07",
-    "through_revision": "254d598107b342c6060909881355e8e69e69eb30",
-    "commit_count": 84,
-    "method": "Reviewed the full commit history, changed upstream documentation and changelog, public declarations and handlers, and focused API tests; reconciled website guidance and pinned source references.",
+    "from_revision": "254d598107b342c6060909881355e8e69e69eb30",
+    "through_revision": "0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c",
+    "commit_count": 26,
+    "method": "Reviewed all new commit subjects, changed upstream docs and changelog, public API/CLI declarations, implementation and focused tests; reconciled prose and generated source tables.",
     "changes": [
-      "Public workload_id naming; shared stop/log targeting; explicit stop_all scope; keyword-only run/build options; sctx support and returned-type stability tiers.",
-      "Readiness by recorded workload ID, PostLaunchResult, metadata-only discovery, recipe protocols/state restoration, external-launch replacement helpers, CX7/SSH diagnosis and systemd export APIs.",
-      "Supported sparkrun.plugins imports, shared conflict policy, setup facade imports, runtime operation-local state, environment ordering and new runtime hooks.",
-      "All 92 bundled daemon operations regenerated with per-operation descriptions; Kubernetes explicitly experimental; external plugin operations and hidden benchmark failure-policy arguments remain excluded.",
-      "Enabled-only plugin/feature inventory and --all; unified update options; registry update command; trust for mods before preparation/replacement; dry-run stop; offline build and recipe loading.",
-      "Foreign-format includes, full-cluster systemd exports, effective TRT-LLM extra config, 128 MiB safetensors index limit, and release highlights."
+      "Interactive monitor logs: source scopes, regex search, runtime colors, paging and full-file export; LogTarget.dump cancellation, prefixes and atomic publication.",
+      "Gateway-owned namespaces, SparkRoute transport schema, LiteLLM router_settings and least-in-flight balancing, successful discovery warnings and safe failure diagnostics.",
+      "Workload inventory completeness and pending activations; existing exact revisions survive recipe source updates; draft export pin diagnostics.",
+      "Dotted mapping-default overrides, YAML/JSON speculative drafter preparation, hybrid recurrent/attention memory estimates, eight new vLLM flag mappings.",
+      "Separate standard and B12X vLLM mapping tables maintained by the generator; 262 mappings across six runtimes.",
+      "Split the old benchmarking tutorial into action-first Performance Benchmarking and Tool Call Benchmarking with results and output formats after starting a run.",
+      "Recommended logical cluster groups for 1/2/4/8 nodes, all-node default, overlapping pairs/quads and normal single-node clusters. Routine examples prefer saved clusters and normal placement; no --solo examples.",
+      "Recommend runtime: vllm with defaults.distributed_executor_backend mp/ray, defaulting to distributed/mp; retain concrete runtime names for implementation reference."
     ],
-    "preserved_user_edits": "Recipe section order, user@example.com metadata examples, 32768/auto walkthrough defaults, stemless terminology, and existing untracked reference pages retained.",
-    "limits": "Documentation changes only; no core edits, commits, deployment, live inference, remote setup, plugin installation, or daemon service started."
-  }
+    "preserved_user_edits": "Recipe section order, user@example.com metadata, 32768/auto guidance, stemless registry terminology, no hidden benchmark failure flags, and bundled-only experimental Kubernetes daemon reference retained.",
+    "limits": "Website documentation and validation tooling only. No core edits, live inference, remote setup, daemon launch, plugin installation, deployment or commit. Local preview remains on port 4324."
+  },
+  "commit_review_history": [
+    {
+      "branch": "develop-next",
+      "from_revision": "cf5e16b9a44079288fd0a712e240d250a3f69b07",
+      "through_revision": "254d598107b342c6060909881355e8e69e69eb30",
+      "commit_count": 84,
+      "method": "Reviewed the full commit history, changed upstream documentation and changelog, public declarations and handlers, and focused API tests; reconciled website guidance and pinned source references.",
+      "changes": [
+        "Public workload_id naming; shared stop/log targeting; explicit stop_all scope; keyword-only run/build options; sctx support and returned-type stability tiers.",
+        "Readiness by recorded workload ID, PostLaunchResult, metadata-only discovery, recipe protocols/state restoration, external-launch replacement helpers, CX7/SSH diagnosis and systemd export APIs.",
+        "Supported sparkrun.plugins imports, shared conflict policy, setup facade imports, runtime operation-local state, environment ordering and new runtime hooks.",
+        "All 92 bundled daemon operations regenerated with per-operation descriptions; Kubernetes explicitly experimental; external plugin operations and hidden benchmark failure-policy arguments remain excluded.",
+        "Enabled-only plugin/feature inventory and --all; unified update options; registry update command; trust for mods before preparation/replacement; dry-run stop; offline build and recipe loading.",
+        "Foreign-format includes, full-cluster systemd exports, effective TRT-LLM extra config, 128 MiB safetensors index limit, and release highlights."
+      ],
+      "preserved_user_edits": "Recipe section order, user@example.com metadata examples, 32768/auto walkthrough defaults, stemless terminology, and existing untracked reference pages retained.",
+      "limits": "Documentation changes only; no core edits, commits, deployment, live inference, remote setup, plugin installation, or daemon service started."
+    }
+  ]
 }

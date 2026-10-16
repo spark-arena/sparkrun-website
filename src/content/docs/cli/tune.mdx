@@ -65,19 +65,19 @@ serving, preserving bundled configurations for other shapes.
 
 ```bash
 # Tune for all default TP sizes (1, 2, 4, 8)
-sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1
+sparkrun tune sglang qwen3.5-35b-bf16-sglang --cluster mylab
 
 # Tune for a specific TP size
-sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1 --tp 2
+sparkrun tune sglang qwen3.5-35b-bf16-sglang --cluster mylab --tp 2
 
 # Tune for multiple specific TP sizes
-sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1 --tp 1 --tp 2 --tp 4
+sparkrun tune sglang qwen3.5-35b-bf16-sglang --cluster mylab --tp 1 --tp 2 --tp 4
 
 # Tune with 4 parallel jobs
-sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1 -j4
+sparkrun tune sglang qwen3.5-35b-bf16-sglang --cluster mylab -j4
 
 # Preview without running
-sparkrun tune sglang qwen3.5-35b-bf16-sglang -H 127.0.0.1 --dry-run
+sparkrun tune sglang qwen3.5-35b-bf16-sglang --cluster mylab --dry-run
 ```
 
 Requires an SGLang recipe (the recipe's `runtime` must be `sglang`). MoE configs are saved to `~/.cache/sparkrun/tuning/sglang/` and auto-mounted via `SGLANG_MOE_CONFIG_DIR`.
@@ -108,28 +108,31 @@ images compatible.
 
 ```bash
 # Tune both MoE and FP8 kernels for all default TP sizes (1, 2, 4, 8)
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1
+sparkrun tune vllm qwen3-moe-vllm --cluster mylab
 
 # FP8 dense GEMM only — much faster (~25 min) for non-MoE FP8 models
-sparkrun tune vllm qwen3-4b-fp8 -H 127.0.0.1 --mode fp8 --tp 1
+sparkrun tune vllm qwen3-4b-fp8 --cluster mylab --mode fp8 --tp 1
 
 # MoE only
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --mode moe --tp 4
+sparkrun tune vllm qwen3-moe-vllm --cluster mylab --mode moe --tp 4
 
 # Tune for multiple specific TP sizes
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --tp 1 --tp 2 --tp 4
+sparkrun tune vllm qwen3-moe-vllm --cluster mylab --tp 1 --tp 2 --tp 4
 
 # Tune with 4 parallel jobs
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 -j4
+sparkrun tune vllm qwen3-moe-vllm --cluster mylab -j4
 
 # Pin an in-flight vllm-tune branch for testing
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --vllm-tune-ref my-pr-branch
+sparkrun tune vllm qwen3-moe-vllm --cluster mylab --vllm-tune-ref my-pr-branch
 
 # Preview without running
-sparkrun tune vllm qwen3-moe-vllm -H 127.0.0.1 --dry-run
+sparkrun tune vllm qwen3-moe-vllm --cluster mylab --dry-run
 ```
 
-Accepts any vLLM recipe variant (`vllm-ray`, `vllm-distributed`, or `eugr-vllm`). Configs are saved to `~/.cache/sparkrun/tuning/vllm/` and auto-mounted via `VLLM_TUNED_CONFIG_FOLDER`.
+Use `runtime: vllm` in recipes; tuning accepts both its distributed/mp and Ray
+variants. Select the serving backend with `defaults.distributed_executor_backend`
+(`mp` or `ray`), leaving it unset for distributed/mp. Configs are saved to
+`~/.cache/sparkrun/tuning/vllm/` and auto-mounted via `VLLM_TUNED_CONFIG_FOLDER`.
 
 The vllm-tune git URL and ref can be pinned in `~/.config/sparkrun/config.yaml`:
 

@@ -3,6 +3,9 @@ title: sparkrun build
 description: Prepare images, model files, tuning configurations, and native environments without starting inference.
 ---
 
+Prefer a saved default cluster or `--cluster NAME` for host selection, including
+single-node use. See [Recommended Cluster Setups](/clusters/recommended-setups/).
+
 `sparkrun build` prepares a recipe's assets for a later `run`. Use it to download
 and distribute models and images, run a builder, or provision a native environment
 before you need to serve the model.
@@ -10,7 +13,7 @@ before you need to serve the model.
 ```bash
 sparkrun build my-recipe --cluster mylab
 sparkrun build my-recipe --cluster mylab --dry-run --json
-sparkrun build native-recipe.yaml --hosts localhost --executor local
+sparkrun build native-recipe.yaml --cluster mylab --executor local
 ```
 
 This advanced command is directly callable. Set `SPARKRUN_ADVANCED=1` to show it
@@ -44,7 +47,7 @@ Launch-strategy hooks do not run during build.
 | Option | Description |
 |---|---|
 | `--hosts` / `-H`, `--hosts-file`, `--cluster` | Select hosts; otherwise use the default cluster |
-| `-o` / `--option KEY=VALUE` | Repeatable recipe overrides |
+| `-o` / `--option KEY=VALUE` | Repeatable recipe overrides; `KEY.FIELD=VALUE` refines a mapping default |
 | `--image` | Override the image |
 | `--tp`, `--pp`, `--dp` | Set recipe parallelism values used during preparation |
 | `--gpu-mem`, `--max-model-len` | Set recipe memory/context values |

@@ -42,14 +42,14 @@ With authentication in place, run a benchmark and submit in one step:
 sparkrun benchmark qwen3-1.7b-sglang --arena
 ```
 
-This uses your default cluster. To target a specific cluster or hosts:
+This uses your default cluster. To target another saved group:
 
 ```bash
 # Use a saved cluster
 sparkrun benchmark qwen3-1.7b-sglang --arena --cluster mylab
 
-# Or specify hosts directly
-sparkrun benchmark qwen3-1.7b-sglang --arena --hosts 10.24.11.13,10.24.11.14
+# Or use a saved pair
+sparkrun benchmark qwen3-1.7b-sglang --arena --cluster pair-a
 ```
 
 For multi-node benchmarks, set tensor parallelism:
@@ -107,7 +107,7 @@ sparkrun benchmark qwen3-1.7b-sglang --arena --cluster mylab --tp 2 --resume
 
 sparkrun also **pins the benchmarking framework version** (e.g. the `llama-benchy` release) on the first task of a run and reuses that exact version for every subsequent task — even after a resume — so the numbers you submit are internally consistent. The pinned version is captured in the uploaded `metadata.json`.
 
-State files live under `~/.cache/sparkrun/benchmarks/`. See [Resumable runs](/tutorials/benchmarking/#8-resumable-runs) in the benchmarking tutorial for more detail.
+State files live under `~/.cache/sparkrun/benchmarks/`. See [Resumable runs](/tutorials/benchmarking/#resume-an-interrupted-run) in the benchmarking tutorial for more detail.
 
 ## 6. Log out (optional)
 
@@ -121,7 +121,7 @@ sparkrun arena logout
 
 - Browse the [Spark Arena leaderboard](https://spark-arena.com) to see community results
 - Try different recipes and runtimes to find the best configuration for your workload
-- See [Benchmarking Models](/tutorials/benchmarking/) for more on sparkrun's benchmark system (custom profiles, parameters, comparing configurations)
+- See [Performance Benchmarking](/tutorials/benchmarking/) for more on sparkrun's benchmark system (custom profiles, parameters, comparing configurations)
 
 ## Publication recovery
 

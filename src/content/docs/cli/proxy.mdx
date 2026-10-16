@@ -29,9 +29,9 @@ client — which sparkrun does not provision, so against a sparkrun-launched
 proxy they answer `500 No DB Connected`.
 
 Applying a change therefore means **rewriting the config and restarting the
-process**. sparkrun skips the restart entirely when the desired model set
-already matches what is on disk, so a steady-state auto-discover sweep costs
-nothing and never interrupts serving. The management API is still used
+process**. sparkrun skips the restart when the model set and routing settings
+already match what is on disk, so unchanged auto-discovery sweeps do not interrupt
+serving. The management API is still used
 read-only, to report what the proxy is currently serving.
 :::
 
@@ -117,7 +117,6 @@ sparkrun proxy start                          # port 4000
 sparkrun proxy start --host 127.0.0.1         # recommended bind address
 sparkrun proxy start --port 8080              # custom port
 sparkrun proxy start --cluster mylab          # discover from cluster hosts
-sparkrun proxy start --hosts 10.0.0.1,10.0.0.2  # explicit host list
 sparkrun proxy start --foreground             # run in foreground (blocking)
 sparkrun proxy start --master-key sk-mykey    # require a bearer token
 sparkrun proxy start --no-auto-discover       # disable periodic re-scanning
@@ -190,6 +189,26 @@ Shows whether the proxy is running, its PID, bind address, auto-discover status,
 sparkrun proxy status
 ```
 
+Discovery failures appear as `Last error`, including safe gateway rejection
+details. Successful imports can instead report `Routing warning` messages;
+warnings do not mark the sweep as failed or delay the normal discovery interval.
+Currently registered models can remain visible even if a later update fails.
+Resolve the reported configuration issue and use `proxy sync` to retry.
+
+### `sparkrun proxy sync`
+
+Re-discover endpoints and apply the desired model list, aliases, and gateway
+settings. For LiteLLM, changed routing settings trigger a restart even when no
+models were added or removed.
+
+```bash
+sparkrun proxy sync
+sparkrun proxy sync --json
+```
+
+Text output lists routing warnings separately. JSON includes `warnings` when
+present, alongside the model change counts.
+
 ### `sparkrun proxy models`
 
 Lists models currently registered with the running proxy. With `--refresh`, re-discovers endpoints and syncs the proxy — adding newly available models and removing stale entries whose backends are no longer healthy.
@@ -229,7 +248,7 @@ This is intentionally different from `sparkrun run`, which uses exactly the port
 | `--pp` / `--pipeline-parallel` | Override pipeline parallelism |
 | `--gpu-mem` | Override GPU memory utilization (0.0–1.0) |
 | `--max-model-len` | Override maximum model context length |
-| `-o` / `--option` | Override recipe options: `-o key=value` (repeatable) |
+| `-o` / `--option` | Override a default with `-o key=value` or one mapping field with `-o key.field=value` (repeatable) |
 | `--image` | Override container image |
 | `--solo` | Force single-node mode |
 | `--offline` / `--online` | Use cached assets or override the cluster's offline launch policy |
@@ -338,7 +357,7 @@ When the proxy starts with auto-discover enabled (the default), a background pro
 
 - Periodically re-discovers endpoints at the configured interval (default: 30 seconds)
 - Reconciles models **and** aliases in one pass — they share a single config file, so applying them separately would restart the proxy twice per sweep
-- Rewrites the config and restarts the proxy only when the desired model set actually differs from what is on disk
+- For LiteLLM, rewrites the config and restarts when models, aliases, or routing settings change
 - Re-reads the proxy PID each sweep, so it follows a restart instead of mistaking it for a shutdown
 - Monitors that PID and exits automatically when the proxy dies
 
@@ -360,10 +379,60 @@ proxy:
 aliases:
   my-model: "Qwen/Qwen3-1.7B"
   gpt-4: "Qwen/Qwen3-30B-A3B"
+
+gateways:
+  litellm:
+    balancing: least-in-flight
+    router_settings:
+      num_retries: 2
 ```
 
 CLI flags override config file values for a given invocation, and explicitly
 supplied values are persisted back.
+
+### Gateway-specific settings
+
+Put settings understood by one gateway under `gateways.<name>`. Each provider
+reads only its own section; shared configuration saves preserve these sections.
+Listener settings, gateway selection, discovery scheduling, and aliases retain
+their shared locations. The provider interprets its own settings.
+
+SparkRoute uses `gateways.sparkroute` for `config`, `transport`, `admin_host`,
+`admin_port`, `allow_insecure_admin_nonloopback`, `capability_policy`,
+`auto_update_recipes`, `bindings`, and `discovered_models`. Legacy locations are
+not read or migrated. Recipe auto-updates default to `true`; set
+`gateways.sparkroute.auto_update_recipes: false` and restart the proxy to require
+manual updates. Updates wait until the previous workload is removed, preserving
+running or sleeping instances. See
+[daemon transport configuration](/advanced/daemon/#gateway-discovery-and-transport)
+for a namespaced example.
+
+### LiteLLM routing and balancing
+
+`gateways.litellm.router_settings` passes LiteLLM router options through. Changes
+are applied on the next sync or discovery sweep by regenerating configuration
+and restarting the proxy.
+
+Without a balancing override, LiteLLM uses `simple-shuffle`, choosing a random
+backend per request. If several backends serve the same model, set
+`gateways.litellm.balancing: least-in-flight` as in the example above to prefer
+the backend with the fewest active requests. Ties are random.
+
+- Counts are shared by a backend's model names and aliases, but each request's
+  candidates remain limited to backends serving the requested model.
+- Each request holds its own slot until success or failure, including retries.
+  Concurrent requests sharing a session/trace ID are counted separately. A slot
+  with no completion notification expires after 15 minutes.
+- Retries prefer a backend the request has not tried when one is available.
+  Failed backends are deprioritized for 10 seconds, except for request errors
+  with status 400, 413, or 422.
+- Counts are local to the proxy process; direct traffic to backends is not counted.
+
+Avoid `router_settings.routing_strategy: least-busy` with Sparkrun's pinned
+LiteLLM release: its counter is not updated on the proxy's async request path.
+With `balancing: least-in-flight`, Sparkrun's balancer controls backend selection
+and overrides `router_settings.routing_strategy`, warning if both are supplied.
+Removing `balancing` restores LiteLLM routing on the next sync/restart.
 
 ### Gateway selection
 

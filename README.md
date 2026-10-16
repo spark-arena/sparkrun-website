@@ -68,13 +68,15 @@ Copyright 2026 Scitrera LLC.
 
 The website is prepared for the 0.4.0 release. Its verification reference is pinned
 in `scripts/docs-contracts.json` to
-`254d598107b342c6060909881355e8e69e69eb30`. Update the verification pin and source
+`0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c`. Update the verification pin and source
 links at the release cut. Stable availability and
 portable-daemon platform checks are release gates, not inferred from version text.
 The reference includes domain-based daemon operations, plugin namespaces, shared
 workload management, gateway discovery, model-cache usage/retention and optional
 LRU cleanup, plugin loading controls and lifecycle plans, shared diagnostic capture
-and plugin reporters, and reusable Docker/native Kubernetes log readers.
+and plugin reporters, reusable Docker/native Kubernetes log readers with atomic
+file export, interactive monitor logs, namespaced gateway settings and balancing,
+dotted recipe overrides, and hybrid attention/recurrent memory estimates.
 `gateway.sparkroute` remains off by default on every channel. The Daemon API reference covers core and bundled integrations;
 its operation inventory excludes external plugins.
 
@@ -83,7 +85,7 @@ cluster (Python 3.12+):
 
 ```sh
 python3.12 -m venv .venv-docs
-.venv-docs/bin/python -m pip install 'sparkrun @ git+https://github.com/spark-arena/sparkrun.git@254d598107b342c6060909881355e8e69e69eb30'
+.venv-docs/bin/python -m pip install 'sparkrun @ git+https://github.com/spark-arena/sparkrun.git@0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c'
 .venv-docs/bin/python scripts/check-docs-contracts.py
 npm run check
 npm run build
@@ -114,6 +116,8 @@ python3 scripts/sync-runtime-flags.py --source /path/to/pinned/sparkrun --check
 
 Review the surrounding prose for flags with special handling, placement-managed
 arguments, aliases, and engine-version requirements when changing the source pin.
+The vLLM table separates standard flags from a reviewed set of B12X-specific
+flags; maintain that classification when the upstream map changes.
 CI repeats the checks for stable/beta/alpha with advanced visibility both off and on
 (`--channel stable --advanced 0`, for example). Python fences are parsed;
 public imports and option constructors are checked without executing workloads.

@@ -10,6 +10,7 @@ This tutorial walks you through launching your first LLM on a DGX Spark using sp
 - sparkrun installed ([Installation guide](/getting-started/installation/))
 - SSH access to a DGX Spark (password or key-based)
 - Docker running on the target Spark
+- A saved default cluster, even for one node ([cluster setup](/clusters/recommended-setups/))
 
 If you haven't set up SSH yet, see [SSH Setup](/getting-started/ssh-setup/).
 
@@ -50,16 +51,16 @@ The VRAM estimate helps you decide whether a model needs multiple nodes. If the 
 
 ## 3. Launch the model
 
-Run the recipe, pointing at your DGX Spark:
-
-```bash
-sparkrun run qwen3-1.7b-vllm --hosts <your-spark-ip>
-```
-
-If you've already created a default cluster, you can omit `--hosts`:
+Run the recipe using normal placement in your default cluster:
 
 ```bash
 sparkrun run qwen3-1.7b-vllm
+```
+
+To select another saved cluster, use its name:
+
+```bash
+sparkrun run qwen3-1.7b-vllm --cluster mylab
 ```
 
 sparkrun will:
@@ -124,7 +125,7 @@ If you detached with Ctrl+C and want to see logs again:
 sparkrun logs qwen3-1.7b-vllm
 ```
 
-Pass `--hosts` or `--cluster` if you used them during launch.
+Pass the same `--cluster` used for launch, or use the workload ID from `sparkrun status`.
 
 ## 7. Check status
 
@@ -144,10 +145,10 @@ When you're done, stop the inference server:
 sparkrun stop qwen3-1.7b-vllm
 ```
 
-Pass `--hosts` or `--cluster` if you used them during launch. sparkrun stops the containers on all target hosts and cleans up.
+Pass the same `--cluster` used for launch, or use the workload ID from `sparkrun status`. sparkrun stops the containers on all target hosts and cleans up.
 
 ## Next steps
 
 - **Scale up**: Run larger models across multiple Sparks with [Multi-Node Tensor Parallelism](/tutorials/multi-node/)
-- **Measure performance**: Benchmark your model with [Benchmarking Models](/tutorials/benchmarking/)
+- **Measure performance**: Benchmark your model with [Performance Benchmarking](/tutorials/benchmarking/)
 - **Serve multiple models**: Use the [Proxy Gateway](/tutorials/proxy-gateway/) to expose multiple models through a single API

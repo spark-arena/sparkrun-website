@@ -69,7 +69,8 @@ gtag('config', 'G-LPQWBYH74V');`,
                     items: [
                         {label: 'Your First Model', slug: 'tutorials/first-model'},
                         {label: 'Multi-Node Tensor Parallelism', slug: 'tutorials/multi-node'},
-                        {label: 'Benchmarking Models', slug: 'tutorials/benchmarking'},
+                        {label: 'Performance Benchmarking', slug: 'tutorials/benchmarking'},
+                        {label: 'Tool Call Benchmarking', slug: 'tutorials/tool-call-benchmarking'},
                         {label: 'Benchmark on Spark Arena', slug: 'tutorials/spark-arena'},
                         {label: 'Proxy Gateway', slug: 'tutorials/proxy-gateway'},
                     ],
@@ -87,6 +88,7 @@ gtag('config', 'G-LPQWBYH74V');`,
                 {
                     label: 'Clusters',
                     items: [
+                        {label: 'Recommended Cluster Setups', slug: 'clusters/recommended-setups'},
                         {label: 'Creating Clusters', slug: 'clusters/creating'},
                         {label: 'Managing Clusters', slug: 'clusters/managing'},
                         {label: 'Cluster Status', slug: 'clusters/status'},

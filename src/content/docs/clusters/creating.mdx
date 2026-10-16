@@ -3,7 +3,12 @@ title: Creating Clusters
 description: Create and configure named clusters for DGX Spark hosts.
 ---
 
-Clusters are named groups of DGX Spark hosts. Save your hosts once and reference them by name in every command.
+Clusters are named logical groups of hosts, including a single host. Groups may
+overlap; they do not partition the physical machines. Save all your nodes as the
+default cluster, then add smaller groups when useful. Prefer cluster names over
+explicit host lists for everyday commands. See
+[Recommended Cluster Setups](/clusters/recommended-setups/) for one-, two-, four-,
+and eight-node examples.
 
 :::tip
 New to sparkrun? Run `sparkrun setup wizard` for a guided walkthrough that creates your cluster, sets up SSH, configures networking, and more — all in one step.
@@ -14,6 +19,7 @@ New to sparkrun? Run `sparkrun setup wizard` for a guided walkthrough that creat
 ```bash
 sparkrun cluster create mylab \
   --hosts 192.168.11.13,192.168.11.14 \
+  --default \
   -d "My DGX Spark lab"
 ```
 
@@ -22,6 +28,7 @@ sparkrun cluster create mylab \
 | Option | Description |
 |---|---|
 | `--hosts` / `-H` | Comma-separated list of host IPs or names |
+| `--default` | Make this the default cluster for subsequent commands |
 | `-d` / `--description` | Human-readable description |
 | `--user` | SSH user for connecting to hosts |
 | `--cache-dir` | Override HuggingFace cache directory for this cluster |

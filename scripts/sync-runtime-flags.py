@@ -17,6 +17,17 @@ RUNTIMES = {
     'modular-max': ('modular_max', '_MAX'),
 }
 
+# Reviewed against core's B12X-fork block. Keep upstream flags such as
+# disable_custom_all_reduce in the standard table even if adjacent in source.
+VLLM_B12X_KEYS = frozenset({
+    'linear_backend', 'gdn_prefill_backend', 'gdn_decode_kernel',
+    'kda_prefill_backend', 'mamba_backend', 'recurrent_checkpoint_policy',
+    'prefix_cache_retention_interval', 'engram_config', 'dcp_comm_backend',
+    'prefill_policy', 'prefill_compute_share', 'prefill_compute_half_life',
+    'prefill_schedule_interval', 'max_parallel_prefills', 'decode_refill_target',
+    'scheduler_reserve_full_isl', 'jit_monitor_mode',
+})
+
 
 def literal(node, names):
     if isinstance(node, ast.Name):
@@ -52,8 +63,8 @@ def render(source, slug, module, prefix):
     negatable = data.get(prefix + '_NEGATABLE_BOOL_FLAGS', ())
     valued_booleans = data.get(prefix + '_VALUE_BOOL_FLAGS', ())
     revision = json.loads((ROOT / 'scripts/docs-contracts.json').read_text())['revision']
-    lines = [BEGIN, '', f'Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/{revision}/{rel}).', '',
-             '| Engine flag | Key under `defaults` | Value form |', '|---|---|---|']
+    lines = [BEGIN, '', f'Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/{revision}/{rel}).', '']
+    rows = {}
     for key, flag in flags.items():
         if key in negatable:
             form = f'Boolean; `false` emits `--no-{flag[2:]}`'
@@ -65,8 +76,28 @@ def render(source, slug, module, prefix):
             form = '`"on"`, `"off"`, `"auto"`; booleans become on/off'
         else:
             form = 'Value'
-        lines.append(f'| `{flag}` | `{key}` | {form} |')
-    lines.extend(['', END])
+        rows[key] = f'| `{flag}` | `{key}` | {form} |'
+    groups = [(None, list(flags))]
+    if slug == 'vllm':
+        missing = VLLM_B12X_KEYS - flags.keys()
+        if missing:
+            raise ValueError('Stale B12X classification: ' + ', '.join(sorted(missing)))
+        groups = [
+            ('Standard vLLM flags', [key for key in flags if key not in VLLM_B12X_KEYS]),
+            ('B12X-specific flags', [key for key in flags if key in VLLM_B12X_KEYS]),
+        ]
+    for title, keys in groups:
+        if title:
+            lines.extend([f'### {title}', ''])
+        if title == 'B12X-specific flags':
+            lines.extend([
+                'These flags require a B12X-compatible image, such as the B12X nightly',
+                'used by the lil adapter. Stock vLLM images can reject them.', '',
+            ])
+        lines.extend(['| Engine flag | Key under `defaults` | Value form |', '|---|---|---|'])
+        lines.extend(rows[key] for key in keys)
+        lines.append('')
+    lines.append(END)
     return '\n'.join(lines), len(flags)
 
 

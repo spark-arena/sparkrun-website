@@ -61,7 +61,7 @@
   "tailscale.status": "Inspect Tailscale installation, connection, and address information on selected hosts.",
   "workloads.endpoints": "Observe credential-free workload endpoints for the requested binding and report live coverage or metadata-only evidence.",
   "workloads.ensure_ready": "Adopt, recover, or launch an exact recipe revision and return a verified ready endpoint with ownership and effect receipts.",
-  "workloads.inventory": "List recorded workload ownership, lifecycle state, provider, and permitted actions for the current manager.",
+  "workloads.inventory": "List recorded workloads and unfinished activations with ownership, lifecycle actions, and a completeness flag.",
   "workloads.plugins": "List plugin inventory and identify enabled, loaded plugins that provide workload lifecycle controls.",
   "workloads.reconcile": "Reconcile uncertain effects for an exact workload after verifying its revision, ownership, and placement evidence.",
   "workloads.sleep": "Ask the owning lifecycle provider to put an exact workload to sleep when that action is supported.",

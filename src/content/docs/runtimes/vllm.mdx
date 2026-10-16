@@ -3,12 +3,15 @@ title: vLLM
 description: Using vLLM for inference on DGX Spark.
 ---
 
-[vLLM](https://github.com/vllm-project/vllm) is the default runtime in sparkrun. It provides first-class support for solo and multi-node inference with two clustering variants:
+[vLLM](https://github.com/vllm-project/vllm) is the default runtime in sparkrun.
+For recipes, **use `runtime: vllm`** and select the backend with
+`defaults.distributed_executor_backend`:
 
-- **`vllm-distributed`** — uses vLLM's built-in distributed backend (the default)
-- **`vllm-ray`** — uses Ray head/worker orchestration
+- **`mp` (default)** — native distributed/multiprocessing, resolved as `vllm-distributed`.
+- **`ray`** — Ray head/worker orchestration, resolved as `vllm-ray`.
 
-You can write `runtime: vllm` in a recipe and sparkrun resolves it automatically — see [Runtime alias resolution](#runtime-alias-resolution) below.
+Omit the backend setting to use distributed/mp. Keep `runtime: vllm` when
+switching between backends; see [Runtime alias resolution](#runtime-alias-resolution).
 
 ## Features
 
@@ -50,23 +53,70 @@ See [Phase 2: Building image](/developer-reference/execution-flow/#phase-2-build
 
 ## Speculative decoding
 
-When a recipe sets `speculative_config` in `defaults` and the JSON blob has a top-level `model` field, sparkrun automatically pre-syncs that draft model to all target hosts alongside the primary model. This happens during the [distribution phase](/developer-reference/execution-flow/#phase-3-distributing-resources) so the container never has to fetch the draft from HuggingFace at launch time (which would fail under sparkrun's offline-hub default).
+When `defaults.speculative_config` has a `model` field, sparkrun pre-syncs that
+draft model to all target hosts alongside the primary model. Both YAML mappings
+and JSON-object strings are supported, including mappings imported from the lil
+catalog. This happens during the
+[distribution phase](/developer-reference/execution-flow/#phase-3-distributing-resources)
+so the container can use the cached drafter under sparkrun's offline-hub default.
 
 ```yaml
 defaults:
-  speculative_config: '{"method": "dflash", "model": "z-lab/Qwen3.6-35B-A3B-DFlash", "num_speculative_tokens": 5}'
+  speculative_config:
+    method: dflash
+    model: z-lab/Qwen3.6-35B-A3B-DFlash
+    num_speculative_tokens: 5
 ```
 
-Both `vllm-distributed` and `vllm-ray` honor this — they share the same `VllmMixin.detect_spec_config_draft_model` resolver. The full `speculative_config` JSON is passed through to `vllm serve` via the `--speculative-config` flag; sparkrun only inspects the `model` field to wire up pre-sync.
+Both `vllm-distributed` and `vllm-ray` honor this. Sparkrun passes the full mapping
+as one JSON argument to `--speculative-config` and uses `model` plus the optional
+`revision` for draft preparation. The draft does not inherit the primary model's
+`model_revision`, since it belongs to a different repository.
+
+Use `-o speculative_config.model=org/other-drafter` to change the model prepared
+for that launch, or `-o speculative_config.num_speculative_tokens=3` to tune one
+field while preserving the rest. If the original config pins a draft revision,
+update that field too when changing repositories. See
+[mapping overrides](/recipes/format/#override-one-field-of-a-mapping).
 
 ## Runtime alias resolution
 
-When a recipe specifies `runtime: vllm` (or omits `runtime` entirely), sparkrun resolves it to a concrete runtime in this order:
+We recommend `runtime: vllm` for both variants. For recipes that let Sparkrun
+generate the command, select the backend in `defaults`:
 
-1. If the recipe hints at Ray usage (`distributed_executor_backend: ray` in defaults, or `--distributed-executor-backend ray` in the command template) → **`vllm-ray`**
-2. Otherwise → **`vllm-distributed`** (the default)
+| `defaults.distributed_executor_backend` | Resolved runtime | Orchestration |
+| --- | --- | --- |
+| Omitted | `vllm-distributed` | Native distributed/mp (default) |
+| `mp` | `vllm-distributed` | Native distributed/mp, selected explicitly |
+| `ray` | `vllm-ray` | Ray head/worker cluster |
 
-You can also set `runtime: vllm-distributed` or `runtime: vllm-ray` explicitly to bypass this resolution.
+To select native distributed/mp explicitly:
+
+```yaml
+runtime: vllm
+defaults:
+  distributed_executor_backend: mp
+```
+
+For Ray, change only the default:
+
+```yaml
+runtime: vllm
+defaults:
+  distributed_executor_backend: ray
+```
+
+For one launch, override that setting without editing the recipe:
+
+```bash
+sparkrun run my-vllm-recipe -o distributed_executor_backend=ray
+sparkrun run my-vllm-recipe -o distributed_executor_backend=mp
+```
+
+The concrete names `vllm-distributed` and `vllm-ray` remain supported, but prefer
+the `vllm` alias so the backend setting controls selection. Older command
+templates containing `--distributed-executor-backend ray` can also select Ray;
+an explicit `-o distributed_executor_backend=mp` overrides that hint.
 
 ## Example recipe
 
@@ -107,7 +157,9 @@ constraints described below.
 
 {/* BEGIN RUNTIME FLAGS */}
 
-Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/src/sparkrun/runtimes/_vllm_common.py).
+Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/runtimes/_vllm_common.py).
+
+### Standard vLLM flags
 
 | Engine flag | Key under `defaults` | Value form |
 |---|---|---|
@@ -155,12 +207,29 @@ Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/2
 | `--max-cudagraph-capture-size` | `max_cudagraph_capture_size` | Value |
 | `--long-prefill-token-threshold` | `long_prefill_token_threshold` | Value |
 | `--mamba-cache-mode` | `mamba_cache_mode` | Value |
+| `--mamba-cache-dtype` | `mamba_cache_dtype` | Value |
+| `--mamba-ssm-cache-dtype` | `mamba_ssm_cache_dtype` | Value |
+| `--reasoning-parser-plugin` | `reasoning_parser_plugin` | Value |
+| `--media-io-kwargs` | `media_io_kwargs` | Value |
+| `--video-pruning-rate` | `video_pruning_rate` | Value |
+| `--allowed-local-media-path` | `allowed_local_media_path` | Value |
+| `--prefix-match-unit` | `prefix_match_unit` | Value |
+| `--enable-mamba-shared-prefix-checkpoint` | `enable_mamba_shared_prefix_checkpoint` | Boolean toggle; `true` emits the flag |
 | `--safetensors-load-strategy` | `safetensors_load_strategy` | Value |
 | `--moe-backend` | `moe_backend` | Value |
 | `--enable-prompt-tokens-details` | `enable_prompt_tokens_details` | Boolean toggle; `true` emits the flag |
 | `--enable-force-include-usage` | `enable_force_include_usage` | Boolean toggle; `true` emits the flag |
 | `--enable-request-id-headers` | `enable_request_id_headers` | Boolean toggle; `true` emits the flag |
 | `--enable-flashinfer-autotune` | `enable_flashinfer_autotune` | Boolean; `false` emits `--no-enable-flashinfer-autotune` |
+| `--disable-custom-all-reduce` | `disable_custom_all_reduce` | Boolean toggle; `true` emits the flag |
+
+### B12X-specific flags
+
+These flags require a B12X-compatible image, such as the B12X nightly
+used by the lil adapter. Stock vLLM images can reject them.
+
+| Engine flag | Key under `defaults` | Value form |
+|---|---|---|
 | `--linear-backend` | `linear_backend` | Value |
 | `--gdn-prefill-backend` | `gdn_prefill_backend` | Value |
 | `--gdn-decode-kernel` | `gdn_decode_kernel` | Value |
@@ -178,14 +247,8 @@ Mappings: [sparkrun 0.4.0 source](https://github.com/spark-arena/sparkrun/blob/2
 | `--decode-refill-target` | `decode_refill_target` | Value |
 | `--scheduler-reserve-full-isl` | `scheduler_reserve_full_isl` | Boolean; `false` emits `--no-scheduler-reserve-full-isl` |
 | `--jit-monitor-mode` | `jit_monitor_mode` | Value |
-| `--disable-custom-all-reduce` | `disable_custom_all_reduce` | Boolean toggle; `true` emits the flag |
 
 {/* END RUNTIME FLAGS */}
-
-The keys from `linear_backend` through `jit_monitor_mode` are B12X-fork options;
-use an image that implements them, such as the B12X nightly used by the lil
-adapter. A stock vLLM image can reject these flags. `disable_custom_all_reduce`
-is also mapped, but is not specific to B12X.
 
 Parallelism and `distributed_executor_backend` are resolved by the selected
 vLLM variant. Sparkrun supplies rank, world-size, rendezvous, and headless-worker
@@ -194,13 +257,15 @@ it defaults to 13345. See the parallelism section below for topology limits.
 
 ## Multi-node with vllm-distributed (default)
 
-`vllm-distributed` uses vLLM's built-in multi-node support. sparkrun handles container lifecycle, InfiniBand detection, and node coordination automatically:
+With `runtime: vllm` and the backend omitted or set to `mp`, Sparkrun selects
+`vllm-distributed`. It uses vLLM's built-in multi-node support, with Sparkrun
+handling container lifecycle, InfiniBand detection, and node coordination:
 
 ```bash
 sparkrun run qwen3-1.7b-vllm --tp 2
 ```
 
-In this case, the recipe default is for single node with tensor_parallel of 1, but we override tensor parallel to leverage 2 DGX Sparks.
+This explicitly requests tensor parallelism across two DGX Sparks in the selected cluster.
 
 No Ray cluster is involved — vLLM coordinates the nodes directly via its native distributed backend. See [Execution Flow](/developer-reference/execution-flow/) for the full multi-node orchestration details.
 
@@ -217,14 +282,16 @@ No Ray cluster is involved — vLLM coordinates the nodes directly via its nativ
 Required node count = `tensor_parallel × pipeline_parallel × data_parallel`. The `data_parallel_rpc_port` defaults to `13345` and can be overridden in recipe defaults.
 
 :::caution[vllm-ray and data parallelism]
-`vllm-ray` currently does **not** support `data_parallel > 1`. Use `vllm-distributed` (omit `distributed_executor_backend: ray`) for DP workloads. The Ray runtime's `validate_recipe` will reject DP > 1 with a clear error.
+The Ray backend currently does **not** support `data_parallel > 1`. For DP
+workloads, keep `runtime: vllm` and use `defaults.distributed_executor_backend: mp`
+or omit the backend setting. The Ray runtime rejects DP > 1 during validation.
 :::
 
 ## Multi-node with vllm-ray
 
 `vllm-ray` forms a Ray cluster first, then runs the serve command on the head node. sparkrun handles Ray cluster setup, InfiniBand detection, and container lifecycle automatically.
 
-To use `vllm-ray`, either set `runtime: vllm-ray` explicitly or add the Ray hint to defaults:
+Select Ray through defaults while keeping the recommended runtime name:
 
 ```yaml
 runtime: vllm
@@ -246,8 +313,11 @@ These options apply only to `vllm-ray`:
 
 Both variants support the same models and vLLM flags. The difference is in multi-node orchestration:
 
-- **`vllm-distributed`** is simpler — no Ray dependency, each node runs independently with vLLM's built-in coordination. This is the default.
-- **`vllm-ray`** provides Ray's cluster management, dashboard, and monitoring. Use it when you need Ray-specific features.
+- **Distributed/mp (default)** uses vLLM's built-in coordination without Ray.
+  Use `runtime: vllm` and omit `distributed_executor_backend`, or set it to `mp`.
+- **Ray** provides Ray's cluster management, dashboard, and monitoring. Keep
+  `runtime: vllm` and set `defaults.distributed_executor_backend: ray` when you
+  need those features.
 
 For single-node (solo) workloads, both variants behave identically.
 

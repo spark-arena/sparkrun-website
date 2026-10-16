@@ -26,6 +26,11 @@ model paths, node ranks, and runtime caches. Authors can declare
 `min_sparkrun_version` to catch incompatible core versions before preparation.
 See [Recipe Format](/recipes/format/#recipe-inheritance).
 
+Use `-o key.field=value` to adjust one field of a mapping-valued default while
+preserving its other fields, including nested settings such as
+`speculative_config.draft_load_config.load_format`. See
+[mapping overrides](/recipes/format/#override-one-field-of-a-mapping).
+
 ## Offline launches and reproducible exports
 
 `run`, `build`, `benchmark`, and `proxy load` accept `--offline` to reuse existing recipes,
@@ -102,10 +107,17 @@ workload log tails before cleanup, preserving evidence for later finalization
 failures. Daemon jobs expose authenticated bundle downloads.
 
 Applications can resolve reusable log targets, follow output, page older history,
-and cancel readers. Native Kubernetes logs share the same source-aware API;
+cancel readers, and export complete logs with `LogTarget.dump()`. Exports publish
+only after a complete read and discard partial output on cancellation or failure.
+Native Kubernetes logs share the same source-aware API;
 transport errors stay separate from workload output. See
 [Diagnostics](/getting-started/diagnostics/), [Diagnostics API](/developer-reference/diagnostics-api/),
 and [Log Streaming API](/developer-reference/logging-api/).
+
+The [cluster monitor](/cli/cluster-commands/#interactive-workload-logs) now opens
+workload logs with Enter or a mouse click. Its viewer supports runtime colorization,
+regex search and highlighting, container/node/cluster scopes, older history, and
+file exports.
 
 ## Hardware-aware setup and SSH identity checks
 
@@ -139,6 +151,12 @@ foreground supervision follows the gateway across managed restarts. See
 
 Inference service exports retain the complete cluster definition and choose
 placement each time the service starts. See [export systemd](/cli/export/#export-systemd).
+
+Gateway-specific settings now live under `gateways.<name>` in `proxy.yaml`.
+LiteLLM accepts `router_settings` and optional `balancing: least-in-flight` to
+route requests to the least-loaded backend serving their model. Discovery reports
+successful imports with routing warnings separately from failed sweeps. See
+[proxy configuration](/cli/proxy/#gateway-specific-settings).
 
 ## Trust before replacing a workload
 
@@ -181,8 +199,8 @@ Tool benchmarks now show scenario verdicts and progress with tool-eval-bench
 v2.8.0. Resume remains suite-level, and unknown totals are reported without an
 invented percentage. Measurement results are retained when export or publication
 fails, so finalization can be retried without repeating measurements.
-See [Benchmarking Models](/tutorials/benchmarking/) and
-[Benchmark API](/developer-reference/benchmark-api/).
+See [Performance Benchmarking](/tutorials/benchmarking/),
+[Tool Call Benchmarking](/tutorials/tool-call-benchmarking/), and [Benchmark API](/developer-reference/benchmark-api/).
 
 ## SGLang dense FP8 tuning
 
@@ -190,6 +208,18 @@ See [Benchmarking Models](/tutorials/benchmarking/) and
 per-rank weight shapes. Compatible saved configurations are installed into
 future Docker serving containers. See [SGLang FP8 tuning](/cli/tune/#dense-fp8-tuning)
 for shape selection and launch behavior.
+
+## Hybrid model sizing and vLLM options
+
+Memory estimates now distinguish per-token attention KV cache from fixed
+per-sequence recurrent state for NemotronH and Qwen3-Next/Qwen3.5-style models.
+Missing recurrent-state metadata still produces a lower-bound estimate. See
+[VRAM estimation](/recipes/format/#vram-estimation-fields-optional).
+
+vLLM recipes can use more mapped defaults for Mamba cache dtypes, hybrid prefix
+caching, parser plugins, and media options. Draft models in `speculative_config`
+are prepared from either YAML mappings or JSON strings, honoring CLI field
+overrides. See [vLLM](/runtimes/vllm/).
 
 ## Breaking Python and plugin API changes
 

@@ -1,6 +1,6 @@
 ---
 title: Log Streaming API
-description: Resolve reusable log targets, read or follow workload output, page history, and cancel readers across Docker and native Kubernetes.
+description: Resolve reusable log targets, follow output, page history, and safely export workload logs across Docker and native Kubernetes.
 ---
 
 `sparkrun.api.open_log_target()` resolves a workload into a reusable `LogTarget`.
@@ -139,6 +139,37 @@ Reader failures raise; the timeout raises `subprocess.TimeoutExpired` and reaps
 the reader. Cancellation discards partial results and returns `[]`; check the
 cancellation event before marking history exhausted.
 
+## Export logs to a file
+
+Use `LogTarget.dump()` for a complete finite export of the selected sources:
+
+```python
+count = target.dump("workload.log", cancel=cancel)
+if not cancel.is_set():
+    print(f"Saved {count} log lines")
+```
+
+`dump(path, *, overwrite=False, cancel=None, prefix=None) -> int` streams through
+the same checked `read()` path as other readers. It reads all retained history,
+grouped by source/rank, rather than just the lines loaded in a viewer. The parent
+directory must already exist. The return value counts log lines, excluding the
+header describing the workload, scope, and sources.
+
+- `prefix=None` adds source tags automatically when multiple sources are selected.
+  Use `False` for unprefixed lines, `True` for role tags (including host when
+  multiple hosts are involved), a string for a fixed prefix, or a callable
+  accepting a `LogLine` and returning its prefix.
+- The explicit `cancel` event overrides the target's captured event. Cancellation
+  removes the partial output and returns the count read so far; check the event
+  before reporting success. Reader failures raise and discard partial output.
+- Output is written to `<path>.partial`, created exclusively with mode `0600`.
+  An existing partial file is refused. Publication happens only after a complete
+  read: `overwrite=True` replaces the destination; the default atomically refuses
+  an existing destination, including one another writer creates during the read.
+- Default publication uses a hard link. Where hard links are unavailable, Windows
+  uses its no-overwrite rename; other platforms raise rather than risk replacing
+  another file. Choose `overwrite=True` only when replacement is intended.
+
 ## Daemon
 
 `GET /v1/streams/logs` accepts `host`, `container`, and `source_id` with the same semantics.
@@ -160,11 +191,10 @@ Use `target.runtime` for colorizer selection, `target.sources` for source
 selection, and `source_sort_key` for consistent rank ordering. Follow, finite
 export, and paging all reuse this target and reader stack.
 
-File paths, export headers/prefixes, overwrite policy, partial-file handling,
-and atomic publication belong in the frontend. Keep export contents streaming;
-do not buffer the entire log to call a whole-file write helper. Atomic
-no-overwrite publication must never fall back to a check followed by replacement.
-There is no `LogTarget.dump` or `windowing_supported` property.
+The frontend chooses the output path, overwrite policy, and prefix; use
+[`LogTarget.dump()`](#export-logs-to-a-file) for streaming export and atomic
+publication. Paging is available for any target with sources; there is no
+`windowing_supported` property.
 
 ## Native Kubernetes workloads
 

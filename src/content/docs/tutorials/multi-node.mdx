@@ -50,11 +50,15 @@ Run with `--tp 2` to spread the model across two Sparks:
 sparkrun run qwen3-30b-a3b-vllm --tp 2
 ```
 
-This uses your default cluster. You can also specify hosts explicitly:
+This uses your default cluster. To constrain placement to a saved pair, select
+its cluster name:
 
 ```bash
-sparkrun run qwen3-30b-a3b-vllm --tp 2 --hosts 10.24.11.13,10.24.11.14
+sparkrun run qwen3-30b-a3b-vllm --tp 2 --cluster pair-a
 ```
+
+The pair is a logical subset of your full cluster, not a separate physical
+installation. See [Recommended Cluster Setups](/clusters/recommended-setups/).
 
 ## 3. What happens behind the scenes
 
@@ -133,5 +137,5 @@ If you launched with `--tp 2`, you must also pass `--tp 2` to `stop` and `logs`.
 
 ## Next steps
 
-- **Measure performance**: Compare single-node vs multi-node throughput with [Benchmarking Models](/tutorials/benchmarking/)
+- **Measure performance**: Compare single-node vs multi-node throughput with [Performance Benchmarking](/tutorials/benchmarking/)
 - **Serve multiple models**: Use the [Proxy Gateway](/tutorials/proxy-gateway/) to expose models through a unified API

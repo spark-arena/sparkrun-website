@@ -1,0 +1,141 @@
+---
+title: Tool Call Benchmarking
+description: Run a tool-calling benchmark, inspect scenario verdicts, and compare model and parser settings.
+---
+
+Use `sparkrun benchmark tools` to test whether a model makes correct tool calls
+with tool-eval-bench. Sparkrun launches the recipe, waits for readiness, runs the
+scenario suite, saves results, and stops the workload it launched.
+
+Choose a recipe whose model supports tool calling and whose runtime is configured
+with the appropriate parser/chat template. The examples use normal placement on
+your default cluster; add `--cluster mylab` to choose another cluster.
+
+For one-node and larger setups, save your hosts as a cluster first; see
+[Recommended Cluster Setups](/clusters/recommended-setups/).
+
+## 1. Run the tool-call suite
+
+Start with the standard suite:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang
+```
+
+Replace the recipe name with the tool-capable recipe you want to evaluate. New
+runs use tool-eval-bench v2.8.0. The framework defaults include one parallel
+scenario, a 120-second request timeout, an eight-turn budget, and temperature 0.
+Recipe benchmark settings, profiles, and explicit `-b` options can override those
+values.
+
+Watch the model launch and readiness checks, then the live scenario results.
+Each completed scenario reports its verdict, points, and duration. Keep the
+benchmark ID and saved result paths printed at completion. Add `--dry-run` to
+preview the command before starting a workload.
+
+## 2. Understand the verdicts
+
+Inspect individual scenarios as well as the aggregate score:
+
+| Result | How to interpret it |
+| --- | --- |
+| `pass` | The model satisfied the scenario's checks |
+| `partial` | Some checks passed; inspect the scenario summary for what was missed |
+| `fail` with a graded result | A measured correctness failure; a zero quality score is still a valid measurement |
+| Timeout, connection, or server failure | An execution problem; fix the serving or connection issue before treating the run as a model comparison |
+
+The saved report preserves completion rate and excluded scenarios. Do not compare
+scores as equivalent if one run skipped or failed to measure part of the suite.
+An infrastructure-only run remains failed and resumable. Live percentages appear
+only when the total is known; multi-trial or unknown totals do not invent one.
+
+If every tool call fails to parse, check the recipe's model-specific tool parser
+and chat template first. Those are serving settings, configured through recipe
+`defaults` or `-o`; `-b` controls the evaluator. See the flag table for your
+[runtime](/runtimes/overview/).
+
+## 3. Change the test conditions
+
+Repeat the suite across several trials when you need to assess consistency:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang -b trials=3
+```
+
+The final live table shows the last trial; saved `trial_statistics` contains the
+aggregates. To include the harder scenarios:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang -b hardmode=true
+```
+
+Useful evaluator settings include:
+
+| Option | Purpose |
+| --- | --- |
+| `-b temperature=0` | Set sampling temperature for evaluation requests |
+| `-b timeout=180` | Allow more time for each request on a slow endpoint |
+| `-b max_turns=12` | Increase the interaction turn budget |
+| `-b parallel=2` | Run more scenarios concurrently |
+| `-b trials=3` | Repeat the suite and retain aggregate trial statistics |
+| `-b hardmode=true` | Include Hard Mode scenarios |
+
+Change one setting at a time, and keep it identical across models you compare.
+Performance-style `pp`/`tg` matrices are a different workflow; use
+[Performance Benchmarking](/tutorials/benchmarking/) for throughput and latency.
+
+## 4. Save and compare the reports
+
+Choose a distinct output path when comparing recipes or serving settings:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang --output tool-calls-baseline.yaml
+```
+
+The YAML export includes Sparkrun's recipe and execution metadata. JSON retains
+the evaluator's versioned result report; CSV contains per-scenario rows such as
+verdict, points, duration, summary, and failure kind. Optional metrics are left
+empty when unavailable. Use the printed paths to find each file.
+
+Compare the same scenario suite and evaluator settings, keeping model, parser,
+chat template, and framework version recorded with the results. A changed parser
+can change the score even when the model weights are identical. See
+[benchmark configuration](/cli/benchmark/#benchmark-configuration) for reusable
+profiles and option precedence.
+
+## Reuse a running workload
+
+Keep the server from a benchmark running with `--no-stop`:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang --no-stop
+```
+
+Then evaluate the matching recorded deployment without launching it again:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang --skip-run -b hardmode=true
+```
+
+`--skip-run` requires matching recorded recipe/execution provenance and leaves
+that workload running. If you change serving settings, launch a new matching
+workload before using `--skip-run`.
+
+## Recover an interrupted run
+
+Fix the serving or connection issue, then repeat the command with `--resume`,
+keeping its recipe and benchmark settings the same:
+
+```bash
+sparkrun benchmark tools qwen3-1.7b-sglang --resume
+```
+
+A tool-eval-bench suite is **one resumable task**. A failed or interrupted suite
+restarts as a whole; live scenario progress is not a per-scenario checkpoint.
+Completed usable measurements can be reused. To intentionally measure again,
+use `--fresh` instead; it discards prior progress.
+
+If measurements finished but export failed, keep the benchmark ID and artifacts
+for finalization retry. See [benchmark recovery](/cli/benchmark/#progress-provenance-and-finalization)
+and [Benchmark API](/developer-reference/benchmark-api/) for automation and typed
+result handling.

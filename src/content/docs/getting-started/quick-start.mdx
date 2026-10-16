@@ -15,16 +15,26 @@ uvx sparkrun setup
 
 The setup wizard walks you through cluster creation, SSH mesh, and CX7 networking interactively. See the [Setup Wizard Walkthrough](/getting-started/setup-wizard/) for a detailed step-by-step guide.
 
-## Run a model (single node)
+## Use a saved cluster
 
-No cluster setup needed — just point sparkrun at a host and run:
+Use the cluster created by the wizard as your default. A single-node cluster is
+normal; for larger installations, put all nodes in the default and optionally
+add smaller logical groups. See [Recommended Cluster Setups](/clusters/recommended-setups/).
+Replace `mylab` below with the name you chose in the wizard.
 
 ```bash
-# Run on localhost (or your default cluster's first host)
+sparkrun cluster set-default mylab
+```
+
+## Run a model
+
+Let Sparkrun choose placement within the default cluster:
+
+```bash
 sparkrun run qwen3-1.7b-vllm
 
-# Run on a specific remote host
-sparkrun run qwen3-1.7b-vllm --hosts 10.24.11.13
+# Or select a different saved cluster
+sparkrun run qwen3-1.7b-vllm --cluster mylab
 ```
 
 sparkrun launches detached containers, follows startup logs, and returns after readiness and required hooks. Use `--no-follow` to wait quietly, `--follow` to keep watching after readiness, or `--no-ready-wait` for launch-only completion. **Ctrl+C detaches the observers and leaves the detached workload running.** See [run](/cli/run/#readiness-and-exit-status).

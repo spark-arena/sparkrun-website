@@ -32,11 +32,15 @@ lists its generated flags and `defaults` keys.
 3. **Set `runtime`** to the engine you're targeting (`vllm`, `sglang`, `llama-cpp`, etc.). While sparkrun can [auto-detect the runtime](/recipes/format/#automatic-runtime-detection) from the command prefix, explicitly setting it is preferred for clarity and to avoid surprises if the heuristics evolve.
 4. **Tune `defaults`** — start with `gpu_memory_utilization: 0.8` and `max_model_len: 32768`. For vLLM, you can instead use `max_model_len: auto` to fit the context length to available GPU memory. Adjust after confirming the model loads.
 5. **Validate**: `sparkrun recipe validate your-recipe.yaml`
-6. **Test**: `sparkrun run your-recipe.yaml --solo --dry-run`
+6. **Test**: `sparkrun run your-recipe.yaml --dry-run`
 
 ## Example: vLLM recipe
 
-Using `runtime: vllm` here resolves to `vllm-distributed` by default (see [vLLM runtime](/runtimes/vllm/) for details on the two variants). Sparkrun generates the `vllm serve` command from the runtime and defaults.
+Use `runtime: vllm` for either backend. With
+`defaults.distributed_executor_backend` omitted or set to `mp`, Sparkrun selects
+native distributed/mp (`vllm-distributed`); set it to `ray` for Ray orchestration.
+Sparkrun generates the `vllm serve` command from the runtime and defaults. See
+[vLLM backend selection](/runtimes/vllm/#runtime-alias-resolution).
 
 ```yaml
 model: my-org/my-model

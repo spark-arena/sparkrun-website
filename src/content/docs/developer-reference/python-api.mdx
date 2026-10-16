@@ -74,7 +74,7 @@ and config/cache namespaces determine policy. The controller identity derives
 from a private seed and canonical config directory; it is not a user-selectable
 controller name. Moving/copying the directory changes that identity. Child
 processes inherit the selected profile/config. See the pinned
-[application profile guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/APPLICATION_PROFILES.md).
+[application profile guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/APPLICATION_PROFILES.md).
 
 Use `sparkrun.application.child_environment()` when launching a child process
 that must retain the selected application binding.
@@ -143,7 +143,7 @@ Keep source provenance: a path to a staged import does not automatically make it
 a trusted local recipe. Refreshing registries or importing is separate from a
 read-only catalog query. Listing does not clean up abandoned imports; a new import
 or explicit `cleanup_catalog_imports()` performs that sweep. See the pinned
-[catalog guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/CATALOG_API.md)
+[catalog guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/CATALOG_API.md)
 for query/pagination and retain/cleanup examples.
 
 ### Setup plans and execution
@@ -153,7 +153,7 @@ findings before applying steps. Probe/readiness and execution share the step mod
 probing never authorizes mutation. Apply/undo return per-step outcomes and preserve
 recovery manifests. Obtain confirmation and per-host sudo credentials in the
 frontend. See [SSH Setup](/getting-started/ssh-setup/) and the pinned
-[headless setup examples](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
+[headless setup examples](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
 
 The following experimental helpers expose the decisions used by the setup CLI:
 
@@ -302,10 +302,38 @@ canonical workload ID. Normal `api.run` callers use its existing replacement
 barrier. To revive recorded recipe state without re-resolution, use
 `Recipe.from_state(job.metadata["recipe_state"])` from `sparkrun.plugins`.
 
+## Workload inventory and recipe revisions
+
+The experimental `sparkrun.api.workloads` surface manages recorded ownership and
+lifecycle state. `inventory(owner=..., sctx=...)` includes unfinished activations
+after caller loss as well as saved workloads. Its result contains `workloads`,
+`providers`, and `complete`:
+
+- At most 256 workload rows are returned. `complete=False` means execution was
+  in flight or the result was truncated; missing rows cannot prove absence.
+- `complete=True` describes complete recorded inventory, not a live health probe.
+- `ensure_ready(binding, owner=..., ...)` can adopt or wake an existing exact
+  revision even when the recipe source has since changed. Receipt and ownership
+  checks still apply. Recovery or launch resolves the source and validates the
+  requested revision before using it.
+
+The daemon's `workloads.inventory` and `workloads.ensure_ready` expose the same
+behavior. See [Daemon API](/developer-reference/daemon-api/#choosing-an-operation).
+
+## Proxy results and discovery warnings
+
+`api.proxy.sync()` returns `ProxySyncResult`, including
+`warnings: tuple[str, ...]`. These are safe routing diagnostics from a successful
+import; they do not mean the sync failed. Discovery status exposes a separate
+`warnings` list alongside `last_error`. Handle both when rendering status.
+`ProxyUpdateFailed` preserves the gateway's safe rejection diagnostic; failed
+discovery reports unexpected exceptions by class name only.
+
 ## Logs and diagnostic capture
 
 Use `api.open_log_target(workload_id, ...)` to resolve reusable sources, then read,
-follow, or page their output. `api.logs(workload_id, ...)` is the convenience
+follow, page, or export their output with `target.dump(path, ...)`.
+`api.logs(workload_id, ...)` is the convenience
 iterator. Public lifecycle APIs and daemon requests/results use `workload_id`,
 including `RunResult.workload_id`. Keep
 `hosts` as the full topology and select one source with `host`, `container`, or
@@ -391,5 +419,5 @@ For operation events and subscribers see [Feedback](/developer-reference/feedbac
 Use public imports instead of leading-underscore modules. Pin compatible core and
 integration releases together. This Python boundary does not retire saved recipe,
 configuration, or benchmark formats by implication. The full pinned
-[migration guide](https://github.com/spark-arena/sparkrun/blob/254d598107b342c6060909881355e8e69e69eb30/docs/DISTRIBUTION_API_MIGRATION.md)
+[migration guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/DISTRIBUTION_API_MIGRATION.md)
 records detailed contract changes.

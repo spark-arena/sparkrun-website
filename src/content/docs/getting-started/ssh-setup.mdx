@@ -12,10 +12,7 @@ Resource transfers use the effective local, push, delegated, or per-node pull po
 The easiest approach is `sparkrun setup ssh`, which creates a full mesh across your cluster hosts **and** the control machine (included automatically):
 
 ```bash
-# Set up SSH mesh across your cluster + this machine
-sparkrun setup ssh --hosts 192.168.11.13,192.168.11.14 --user ubuntu
-
-# Or use a saved cluster
+# Set up SSH mesh across your saved cluster + this machine
 sparkrun setup ssh --cluster mylab
 
 # Or use your default cluster
@@ -104,7 +101,8 @@ sudo usermod -aG docker "$USER"
 ```
 
 :::tip
-Solo mode (`--solo`) runs on a single host and still uses SSH unless the target is `localhost`.
+A single-node cluster uses the normal workflow and still connects over SSH unless
+the saved target is `localhost`. Prefer a saved cluster even for one node.
 :::
 
 ## Login identity location

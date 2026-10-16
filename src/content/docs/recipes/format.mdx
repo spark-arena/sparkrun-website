@@ -6,8 +6,8 @@ description: Complete specification of the sparkrun recipe YAML format.
 A sparkrun recipe is a YAML file that describes everything needed to launch an inference workload: the model, the container image, the runtime engine, and its settings. Recipes are the central abstraction in sparkrun — they let you capture a known-good configuration once and replay it with a single command.
 
 ```bash
-sparkrun run my-recipe --solo          # use defaults
-sparkrun run my-recipe -H host1,host2  # override hosts
+sparkrun run my-recipe                  # use the default cluster
+sparkrun run my-recipe --cluster mylab   # select a saved cluster
 sparkrun run my-recipe -o port=9000    # override any default
 ```
 
@@ -123,9 +123,9 @@ Which inference engine to use:
 
 | Value | Engine | Clustering | Notes |
 |---|---|---|---|
-| `vllm` | vLLM | varies | Virtual alias — resolves to `vllm-distributed` (default) or `vllm-ray`. See [vLLM runtime](/runtimes/vllm/). |
-| `vllm-distributed` | vLLM | Native | Default vLLM variant. Uses vLLM's built-in distributed backend. |
-| `vllm-ray` | vLLM | Ray | vLLM with Ray head/worker orchestration. |
+| `vllm` | vLLM | Native or Ray | Recommended. Set `defaults.distributed_executor_backend` to `mp` or `ray`; omitted selects distributed/mp. |
+| `vllm-distributed` | vLLM | Native | Concrete implementation name; prefer `vllm` with backend omitted or `mp`. |
+| `vllm-ray` | vLLM | Ray | Concrete implementation name; prefer `vllm` with backend `ray`. |
 | `sglang` | SGLang | Native | First-class. Solo and multi-node. |
 | `llama-cpp` | llama.cpp | N/A | Solo mode. GGUF models. |
 | `trtllm` | TensorRT-LLM | MPI | NVIDIA TensorRT-LLM with MPI-based multi-node orchestration. |
@@ -133,6 +133,10 @@ Which inference engine to use:
 | `modular-max` | [Modular MAX](https://www.modular.com/max) | N/A | Single-node only. `tensor_parallel` maps to local `--devices`, not to host count. |
 
 Explicitly setting `runtime` is **recommended** for clarity and forward-compatibility. However, this field is technically optional — when omitted, sparkrun uses [automatic runtime detection](#automatic-runtime-detection) to infer the runtime from the `command` field. If neither `runtime` nor a recognizable command is present, the recipe defaults to `vllm` behavior.
+
+For vLLM, keep `runtime: vllm` when switching backends and change
+`defaults.distributed_executor_backend`. See
+[vLLM backend selection](/runtimes/vllm/#runtime-alias-resolution) for examples.
 
 ### `container` (required)
 
@@ -291,7 +295,9 @@ recipe you did not write.
 
 ### `defaults`
 
-A flat dictionary of default parameter values. Every key is available as a `{placeholder}` in the command template and can be overridden at launch via CLI flags or `-o key=value`.
+A dictionary of default parameter values, including mappings/lists for JSON-valued
+engine flags. Every key is available as a `{placeholder}` in the command template
+and can be overridden at launch via CLI flags or `-o key=value`.
 
 ```yaml
 defaults:
@@ -326,6 +332,38 @@ placeholders, but an arbitrary key is not automatically forwarded as a flag.
 **Config chain precedence**, from lowest to highest: runtime defaults, platform
 defaults, recipe defaults, matching [conditional overrides](#conditional-overrides),
 then CLI overrides (`--port 9000`, `--served-model-name my-model`, `-o key=value`).
+
+#### Override one field of a mapping
+
+Use `-o key.field=value` to change one field without replacing the rest of a
+mapping-valued default. Nested paths work too:
+
+```yaml
+defaults:
+  speculative_config:
+    method: dflash
+    model: z-lab/Qwen3.6-35B-A3B-DFlash
+    num_speculative_tokens: 5
+```
+
+```bash
+sparkrun run my-recipe -o speculative_config.num_speculative_tokens=3 \
+  -o speculative_config.draft_load_config.load_format=auto
+```
+
+The example preserves `method` and `model`. The root must already contain a
+mapping or a JSON-object string; a missing/scalar root or a path through a scalar
+is rejected. To supply a whole mapping first, use JSON:
+
+```bash
+sparkrun run my-recipe -o 'speculative_config={"method":"dflash","model":"z-lab/Qwen3.6-35B-A3B-DFlash"}' \
+  -o speculative_config.num_speculative_tokens=3
+```
+
+Dotted overrides refine the effective value, including matching conditional
+overrides, and do not edit the recipe file. Keep nested YAML under its root in
+`defaults`; dotted YAML keys are not expanded. `-o env.KEY=value` retains its
+separate meaning: setting a container environment variable.
 
 ### `env`
 
@@ -431,8 +469,20 @@ When you do need to override, the values in `metadata` take precedence over anyt
 | `head_dim` | int | Dimension per attention head |
 | `model_vram` | float | Override: total model weight VRAM in GB |
 | `kv_vram_per_token` | float | Override: KV cache bytes per token |
+| `attention_layers` | int | Hybrid attention/recurrent model: count of layers with per-token KV cache; selects hybrid sizing |
+| `recurrent_state_bytes` | int | Hybrid model: total recurrent state bytes per sequence across recurrent layers |
 
 Use `sparkrun show <recipe>` or `sparkrun recipe vram <recipe>` to see what auto-detection currently reports — start there and only fill in metadata fields when the displayed estimate is off.
+
+For hybrid attention/recurrent models such as NemotronH and Qwen3-Next/Qwen3.5,
+sparkrun detects the layer layout from `hybrid_override_pattern`,
+`layers_block_type`, or `layer_types`. Only attention layers contribute per-token
+KV cache; Mamba2/GatedDeltaNet layers add a fixed state per sequence. Maximum
+context sizing subtracts one sequence's recurrent state before calculating the
+remaining token budget. If that state cannot be determined, the estimate is a
+lower bound. Layouts containing only sliding/full attention are not treated as
+recurrent hybrids. These fields normally come from model configuration; manual
+metadata overrides remain optional.
 
 ## Mods
 

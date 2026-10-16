@@ -3,6 +3,9 @@ title: sparkrun status
 description: Check the status of running inference workloads.
 ---
 
+Prefer a saved default cluster or `--cluster NAME` for host selection, including
+single-node use. See [Recommended Cluster Setups](/clusters/recommended-setups/).
+
 ```bash
 sparkrun status [options]
 ```
@@ -54,6 +57,6 @@ sparkrun status
 # Check a specific cluster
 sparkrun status --cluster mylab
 
-# Check specific hosts
-sparkrun status --hosts 192.168.11.13,192.168.11.14
+# Check a saved subgroup
+sparkrun status --cluster pair-a
 ```

@@ -164,6 +164,8 @@ sparkrun recipe vram <recipe> [options]
 | `--no-auto-detect` | Skip HuggingFace model auto-detection |
 
 Memory estimates distinguish model weights, KV demand, and runtime overhead.
+Recognized hybrid models count attention-layer KV plus fixed per-sequence recurrent
+state, rather than charging every layer for a full KV cache.
 Unknown or lower-bound cache estimates do not prove that a model fits; engine
 memory fractions and scheduler reservations are separate. See
 [Schedulers & Placement](/advanced/schedulers/).

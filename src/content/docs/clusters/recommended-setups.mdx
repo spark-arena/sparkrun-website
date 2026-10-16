@@ -1,0 +1,136 @@
+---
+title: Recommended Cluster Setups
+description: Organize one, two, four, or eight nodes into a default cluster and reusable logical groups.
+---
+
+A Sparkrun **cluster is a named logical group of hosts** with saved connection
+and execution settings. It does not have to match a physical rack, network, or
+dedicated group of machines. The same host can belong to several clusters, and
+**a single-node cluster is normal**.
+
+Use a cluster containing all your nodes as the default. Add smaller named groups
+when you want to choose a particular part of that pool. Prefer `--cluster NAME`
+or the saved default over repeating `--hosts` on workload commands: the cluster
+keeps host membership, SSH identity, cache paths, and other settings together.
+
+| Nodes you have | Recommended saved groups |
+| --- | --- |
+| 1 | One default cluster containing the node |
+| 2 | One default cluster containing both nodes; usually all you need |
+| 4 | All four as the default, plus two two-node pairs |
+| 8 | All eight as the default, plus four two-node pairs and two four-node groups |
+
+The examples below are alternatives for different installation sizes. Replace
+`spark-1`, `spark-2`, and so on with your hosts' management names or addresses.
+Use the same identity for a host in every group. Choose pairs and four-node
+groups that fit your physical network's fast connections; saving a logical group
+does not configure or change the network.
+
+## One node
+
+Save your node once and make it the default:
+
+```bash
+sparkrun cluster create mylab --hosts spark-1 --default
+sparkrun setup ssh --cluster mylab
+sparkrun run qwen3-1.7b-vllm
+```
+
+For a controller that is also the only execution node, the saved host can be
+`localhost`. You still use the normal cluster workflow; no special single-node
+launch flag is needed. The [setup wizard](/getting-started/setup-wizard/) can
+create and configure this cluster for you too.
+
+## Two nodes
+
+Keep both nodes in your default cluster:
+
+```bash
+sparkrun cluster create mylab --hosts spark-1,spark-2 --default
+```
+
+That is usually enough. Normal placement can select one node for a small recipe
+or both for a recipe that needs them. You do not need separate one-node clusters
+to run single-node workloads.
+
+## Four nodes
+
+Save all four as the default and add two pairs:
+
+```bash
+sparkrun cluster create mylab --hosts spark-1,spark-2,spark-3,spark-4 --default
+sparkrun cluster create pair-a --hosts spark-1,spark-2
+sparkrun cluster create pair-b --hosts spark-3,spark-4
+```
+
+Use the default when placement can choose from the full pool. Choose `pair-a` or
+`pair-b` when a workload should stay within that pair:
+
+```bash
+sparkrun run qwen3-1.7b-vllm
+sparkrun run my-recipe --cluster pair-a
+sparkrun cluster status --cluster pair-b
+```
+
+## Eight nodes
+
+Keep all eight in the default, then add four pairs and two groups of four:
+
+```bash
+sparkrun cluster create mylab \
+  --hosts spark-1,spark-2,spark-3,spark-4,spark-5,spark-6,spark-7,spark-8 --default
+
+sparkrun cluster create pair-a --hosts spark-1,spark-2
+sparkrun cluster create pair-b --hosts spark-3,spark-4
+sparkrun cluster create pair-c --hosts spark-5,spark-6
+sparkrun cluster create pair-d --hosts spark-7,spark-8
+
+sparkrun cluster create quad-a --hosts spark-1,spark-2,spark-3,spark-4
+sparkrun cluster create quad-b --hosts spark-5,spark-6,spark-7,spark-8
+```
+
+The pairs and four-node groups overlap the default by design. For example,
+`spark-1` belongs to `pair-a`, `quad-a`, and `mylab`; it remains one physical host
+with the same available capacity.
+
+## Let placement choose within the group
+
+Selecting a cluster supplies candidate hosts. It does **not** force every member
+to participate in a launch or set tensor parallelism to the cluster's size.
+Recipe requirements, runtime support, hardware, and current occupancy determine
+the actual placement. Use normal placement unless you are deliberately testing
+a particular parallelism setting.
+
+Overlapping cluster names do not create extra capacity or reserve hosts for one
+group. Workloads on a pair still occupy those same hosts when launching through
+the default or a four-node group. See [Schedulers & Placement](/advanced/schedulers/).
+
+## Keep everyday commands tied to a cluster
+
+Use the default for the full pool, or a subgroup such as `pair-a` if you created it:
+
+```bash
+sparkrun cluster set-default mylab
+sparkrun run my-recipe
+sparkrun benchmark perf my-recipe --cluster pair-a
+sparkrun logs my-recipe --cluster pair-a
+sparkrun stop my-recipe --cluster pair-a
+```
+
+When selecting an existing workload by recipe, use the cluster and
+intent-changing settings from its launch. You can also use the workload ID shown
+by `sparkrun status` for an exact target.
+
+Each saved group has its own configuration; subgroup names do not inherit the
+default cluster's SSH user, cache settings, or topology. Apply the appropriate
+settings when creating them and inspect the result:
+
+```bash
+sparkrun cluster list
+sparkrun cluster inspect pair-a
+```
+
+Use `--hosts` when defining or updating group membership. For routine setup,
+launch, benchmark, log, and stop commands, prefer the saved cluster. See
+[Creating Clusters](/clusters/creating/) and [Managing Clusters](/clusters/managing/)
+for configuration options.

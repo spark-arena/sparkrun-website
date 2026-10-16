@@ -86,6 +86,11 @@ Ordinary workloads reserve accelerators exclusively; a runtime utilization below
 
 Model weights, KV-cache demand, runtime overhead, scheduling budget, and observed free capacity are different quantities. MLA and hybrid cache architectures may produce an unknown or lower-bound estimate. Missing hardware/cache evidence is not a successful fit check. Use the placement diagnostics and actual runtime readiness to assess a launch; do not treat a weight-only estimate as a memory guarantee.
 
+For recognized attention/recurrent hybrids, Sparkrun counts per-token KV only on
+attention layers and adds one sequence's fixed recurrent state. Missing state
+metadata makes this a lower bound; concurrent sequences need additional state.
+See [VRAM estimation fields](/recipes/format/#vram-estimation-fields-optional).
+
 ## Explicit placement with `layout`
 
 :::caution[Experimental — subject to change]

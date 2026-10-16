@@ -3,7 +3,13 @@ title: benchmark
 description: Automated benchmarking for inference recipes.
 ---
 
+Prefer a saved default cluster or `--cluster NAME` for host selection, including
+single-node use. See [Recommended Cluster Setups](/clusters/recommended-setups/).
+
 The `sparkrun benchmark` command runs end-to-end benchmarking: it launches inference, executes a benchmark framework against the running server, collects results, and stops inference — all in one command.
+
+For step-by-step runs, follow [Performance Benchmarking](/tutorials/benchmarking/)
+or [Tool Call Benchmarking](/tutorials/tool-call-benchmarking/).
 
 ## Usage
 
@@ -28,33 +34,33 @@ so `sparkrun benchmark --help` is the authoritative list for your install.
 ## Quick examples
 
 ```bash
-# Benchmark on localhost with defaults (uses llama-benchy)
-sparkrun benchmark qwen3-1.7b-vllm --solo
+# Benchmark with normal placement (uses llama-benchy)
+sparkrun benchmark qwen3-1.7b-vllm
 
 # Benchmark using a specific profile from a registry
 sparkrun benchmark qwen3-1.7b-sglang --profile spark-arena-v1
 
 # Benchmark an already-running inference server (skip launch/stop)
-sparkrun benchmark qwen3-1.7b-vllm --skip-run --hosts 192.168.11.13
+sparkrun benchmark qwen3-1.7b-vllm --skip-run --cluster mylab
 
 # Override benchmark args (use -b for benchmark options)
-sparkrun benchmark qwen3-1.7b-vllm --solo -b depth=0,4096,16384 -b concurrency=1,2,5
+sparkrun benchmark qwen3-1.7b-vllm -b depth=0,4096,16384 -b concurrency=1,2,5
 
 # Override recipe options (use -o for recipe overrides like gpu_memory_utilization)
-sparkrun benchmark qwen3-1.7b-vllm --solo -o gpu_memory_utilization=0.9
+sparkrun benchmark qwen3-1.7b-vllm -o gpu_memory_utilization=0.9
 
 # Benchmark and submit to Spark Arena (after sparkrun arena login)
 sparkrun benchmark qwen3-1.7b-sglang --arena
 
 # Dry run — shows what would be done
-sparkrun benchmark qwen3-1.7b-vllm --solo --dry-run
+sparkrun benchmark qwen3-1.7b-vllm --dry-run
 ```
 
 ## How it works
 
 The benchmark command follows a three-step flow:
 
-1. **Launch inference** — Starts the inference server using the same logic as `sparkrun run`. The server's `served_model_name` is suppressed so the benchmark framework can address the model by its HuggingFace ID.
+1. **Launch inference** — Starts inference using the same placement and readiness path as `sparkrun run`. The framework resolves the request model name from the serving configuration.
 2. **Run benchmark** — Executes the benchmarking framework (default: [llama-benchy](https://github.com/eugr/llama-benchy)) against the running server. Results are streamed live and captured for export.
 3. **Stop inference** — Stops the inference server after benchmarking completes.
 
@@ -67,7 +73,7 @@ Each step can be controlled independently:
 | Option                       | Description                                              |
 |------------------------------|----------------------------------------------------------|
 | `RECIPE_NAME`                | Recipe to benchmark (required)                           |
-| `--hosts` / `-H`             | Comma-separated host list (first = head)                 |
+| `--hosts` / `-H`             | Candidate host list; placement selects the head                 |
 | `--hosts-file`               | File with hosts (one per line, `#` comments)             |
 | `--cluster`                  | Use a saved cluster by name                              |
 | `--solo`                     | Force single-node mode                                   |
@@ -78,7 +84,7 @@ Each step can be controlled independently:
 | `--port`                     | Override serve port                                      |
 | `--image`                    | Override container image                                 |
 | `--offline` / `--online`     | Use cached assets or override cluster offline policy; see [Offline launches](/cli/run/#offline-launches) |
-| `-o` / `--option`            | Override recipe options: `-o key=value` (repeatable)     |
+| `-o` / `--option`            | Override a default: `-o key=value`; mapping field: `-o key.field=value` (repeatable)     |
 | `--profile`                  | Benchmark profile name or file (`@registry/name` syntax) |
 | `--framework`                | Override benchmarking framework (default: `llama-benchy`) |
 | `--output`                   | Output file for results YAML                             |
@@ -242,7 +248,7 @@ Common benchmark args:
 
 ```bash
 # Example: comprehensive benchmark
-sparkrun benchmark my-recipe --solo \
+sparkrun benchmark my-recipe \
   -b pp=2048 \
   -b tg=32,128 \
   -b depth=0,4096,16384,65536 \

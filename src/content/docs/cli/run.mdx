@@ -3,6 +3,9 @@ title: sparkrun run
 description: Launch an inference workload using a sparkrun recipe.
 ---
 
+Prefer a saved default cluster or `--cluster NAME` for host selection, including
+single-node use. See [Recommended Cluster Setups](/clusters/recommended-setups/).
+
 ```bash
 sparkrun run <recipe> [options]
 ```
@@ -57,7 +60,7 @@ zeros. See [recipe readiness](/recipes/format/#readiness).
 | `--max-model-len` | Override maximum model context length |
 | `--served-model-name` | Override served model name |
 | `--image` | Override container image (not recommended) |
-| `-o` / `--option` | Override any recipe default: `-o key=value` (repeatable) |
+| `-o` / `--option` | Override a recipe default with `-o key=value`, or one mapping field with `-o key.field=value` (repeatable) |
 | `--dry-run` / `-n` | Show what would be done without executing |
 | `--trust` | Authorize recipe hooks, mods, and trust-gated execution settings. See [Security & Trust](/advanced/security/). |
 | `--foreground` | Run in foreground (don't detach) |
@@ -78,6 +81,10 @@ zeros. See [recipe readiness](/recipes/format/#readiness).
 
 Use `-o key=value` to override recipe defaults — that is the supported way to
 pass engine-level settings through to the serve command.
+For a mapping-valued default, `-o speculative_config.num_speculative_tokens=3`
+preserves its other fields. The root must already be a mapping or JSON-object
+string. See [mapping overrides](/recipes/format/#override-one-field-of-a-mapping)
+for nested paths and whole-value examples.
 
 ## Offline launches
 
@@ -119,14 +126,14 @@ The `<recipe>` argument can be:
 ## Examples
 
 ```bash
-# Single node
+# Normal placement in the default cluster
 sparkrun run qwen3-1.7b-vllm
 
 # Two-node tensor parallel
 sparkrun run qwen3-1.7b-vllm --tp 2
 
-# Specific hosts with overrides
-sparkrun run qwen3-1.7b-vllm -H 192.168.11.13,192.168.11.14 -o max_model_len=8192
+# Saved cluster with overrides
+sparkrun run qwen3-1.7b-vllm --cluster mylab -o max_model_len=8192
 
 # Run a recipe from Spark Arena
 sparkrun run @spark-arena/<recipe-id>

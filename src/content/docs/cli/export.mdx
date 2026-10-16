@@ -72,7 +72,8 @@ supply a missing registry digest, and the controller cache can supply model
 metadata when absent on a target.
 
 Pinning has limits: locally built images can require `--no-pin`, and a separate
-draft model in `speculative_config.model` is reported but not pinned. Inspect
+draft model in `speculative_config.model` is not automatically pinned. It is
+reported as unpinned unless `speculative_config.revision` is already supplied. Inspect
 the export diagnostics for unresolved or unpinned assets. Online image lookup
 uses anonymous access or inline Docker credentials; it does not invoke Docker
 credential helpers.
@@ -152,7 +153,7 @@ to plan, render, and install these artifacts separately.
 | `--pp` / `--pipeline-parallel` | Override pipeline parallelism |
 | `--gpu-mem` | Override GPU memory utilization |
 | `--max-model-len` | Override maximum model context length |
-| `--option` / `-o` | Override any recipe default (repeatable) |
+| `--option` / `-o` | Override a default (`key=value`) or mapping field (`key.field=value`); repeatable |
 | `--image` | Override container image |
 | `--port` | Override service port |
 | `--served-model-name` | Override served model name |

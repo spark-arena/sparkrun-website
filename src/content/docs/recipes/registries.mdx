@@ -334,7 +334,7 @@ sparkrun registry add https://github.com/myorg/spark-recipes.git
 sparkrun clones the repo, reads the manifest, and registers all declared entries. Your recipes then appear in `sparkrun list` and can be run by name:
 
 ```bash
-sparkrun run @my-team/my-model-vllm -H 192.168.11.13
+sparkrun run @my-team/my-model-vllm --cluster mylab
 ```
 
 ## Recipe discovery order

@@ -3,6 +3,9 @@ title: Setup Commands
 description: Install sparkrun, configure networking, permissions, and cluster prerequisites.
 ---
 
+Prefer a saved default cluster or `--cluster NAME` for host selection, including
+single-node use. See [Recommended Cluster Setups](/clusters/recommended-setups/).
+
 ## Setup wizard
 
 ```bash
@@ -168,7 +171,7 @@ Configure ConnectX-7 network interfaces on cluster hosts for high-speed NCCL/RDM
 Existing valid configurations are preserved unless `--force` is used. IP addresses are derived from each host's management IP last octet (e.g., management `10.24.11.13` → CX-7 `192.168.11.13` and `192.168.12.13`).
 
 ```bash
-sparkrun setup cx7 --hosts 10.24.11.13,10.24.11.14
+sparkrun setup cx7 --cluster mylab
 sparkrun setup cx7 --cluster mylab --dry-run
 sparkrun setup cx7 --cluster mylab --subnet1 192.168.11.0/24 --subnet2 192.168.12.0/24
 sparkrun setup cx7 --cluster mylab --force
@@ -218,7 +221,7 @@ Unlike `setup check`, this command sends real traffic and takes a few minutes.
 sparkrun setup rdma-test --cluster mylab
 sparkrun setup rdma-test --cluster mylab --suite all
 sparkrun setup rdma-test --cluster mylab --dry-run
-sparkrun setup rdma-test --hosts 10.24.11.13,10.24.11.14 --json
+sparkrun setup rdma-test --cluster mylab --json
 ```
 
 | Option | Description |
@@ -327,7 +330,6 @@ sparkrun configures earlyoom with inference-aware defaults:
 
 ```bash
 sparkrun setup earlyoom --cluster mylab
-sparkrun setup earlyoom --hosts 10.24.11.13,10.24.11.14
 sparkrun setup earlyoom --cluster mylab --prefer "my-worker,my-app"
 sparkrun setup earlyoom --cluster mylab --dry-run
 ```
@@ -369,7 +371,6 @@ Output is written as NDJSON (one JSON record per line) for easy parsing and proc
 
 ```bash
 sparkrun setup diagnose --cluster mylab
-sparkrun setup diagnose --hosts 10.24.11.13,10.24.11.14
 sparkrun setup diagnose --cluster mylab --output diag.ndjson
 sparkrun setup diagnose --cluster mylab --sudo
 sparkrun setup diagnose --cluster mylab --json

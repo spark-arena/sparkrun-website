@@ -126,7 +126,8 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
-Aliases are applied immediately — no proxy restart needed. List all aliases with:
+Alias changes are applied immediately; the bundled LiteLLM gateway regenerates
+its config and restarts when needed. List all aliases with:
 
 ```bash
 sparkrun proxy alias list
@@ -203,3 +204,20 @@ With auto-discovery disabled, use `sparkrun proxy models --refresh` to manually 
 - **Full reference**: See the [proxy CLI reference](/cli/proxy/) for all options and configuration details
 - **First model**: If you haven't launched a model yet, start with [Your First Model](/tutorials/first-model/)
 - **Scale up**: Run larger models across multiple Sparks with [Multi-Node Tensor Parallelism](/tutorials/multi-node/)
+
+## Balance replicas of the same model
+
+When several backends serve the same model, configure the bundled gateway in
+`~/.config/sparkrun/proxy.yaml`:
+
+```yaml
+gateways:
+  litellm:
+    balancing: least-in-flight
+```
+
+Apply the change with `sparkrun proxy sync`. LiteLLM restarts with the updated
+policy; requests then prefer the backend serving their model with the fewest
+requests in flight. Counts include aliases and are local to this proxy process.
+See [LiteLLM routing and balancing](/cli/proxy/#litellm-routing-and-balancing)
+for retry behavior, router settings, and limitations.
