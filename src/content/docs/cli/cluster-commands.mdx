@@ -172,7 +172,12 @@ workload log viewing. By default this launches a TUI; pass `--simple` for
 plain-text output or `--json` for telemetry samples. Press `q` on the main screen
 or `Ctrl-C` to stop.
 
-![Cluster monitor TUI](/sparkrun-cluster-monitor.jpg)
+<figure>
+  <a href="/sparkrun-cluster-monitor-0.4.0.png" aria-label="View the cluster monitor screenshot at full size">
+    <img src="/sparkrun-cluster-monitor-0.4.0.png" alt="Cluster monitor showing six hosts, sensor sparklines for the selected host, and colorized workload logs." width="1920" height="1043" loading="lazy" decoding="async" />
+  </a>
+  <figcaption>Host metrics, sensor history, and workload logs. Select the image for full size. Screenshot from <a href="https://github.com/spark-arena/sparkrun/pull/322">PR #322</a>.</figcaption>
+</figure>
 
 | Option | Description |
 |---|---|
@@ -197,6 +202,36 @@ column therefore shows every executor's workloads, not just Docker containers.
 The `--simple` and `--json` paths are telemetry-only.
 :::
 
+### Host metrics and history
+
+Select a host to see its CPU and GPU identity, memory use, and recent sensor
+history. The detail panel uses compact sparklines for CPU/GPU utilization,
+temperatures, GPU power and clock, RAM, and network send/receive rates. The
+nv-monitor backend also supplies application/cache memory breakdowns when available.
+Unavailable metrics display `-` and are skipped in the history.
+
+By default, the session retains up to 120 telemetry points per host, about four minutes at
+the default two-second interval. Collection continues while you view another
+host or workload logs; history starts when the monitor opens and is not persisted.
+Network rates use adaptive bits-per-second units in the TUI; JSON sample fields
+`net_send_bytes_s` and `net_recv_bytes_s` use bytes per second. The Bash backend
+sums non-loopback interfaces.
+
+Set the per-host history capacity in `config.yaml`:
+
+```yaml
+monitor:
+  history_points: 300  # About ten minutes at a two-second sampling interval
+```
+
+Use a positive integer; missing, invalid, or non-positive settings fall back to
+120. Repeated reads of the same sample do not add points, so stalled telemetry
+does not appear as fresh flat-line readings. The window is bounded by sample
+count, not a guaranteed duration.
+
+Applications can access the same session history through the
+[Python monitoring API](/developer-reference/python-api/#live-monitoring-and-telemetry-history).
+
 ### Interactive workload logs
 
 Select a host with Enter to open its workload list, then choose a workload with
@@ -217,7 +252,8 @@ output and provides a fallback for other runtimes.
 
 Scroll upward to page older retained history. Cluster scope combines the selected
 workload's sources in arrival order while following. Searching operates on loaded
-history, and paging depends on the logs still retained by the backend.
+history, and paging depends on the logs still retained by the backend. Once the
+search input is focused, typing `/` inserts a literal slash into your expression.
 
 The export dialog lets you choose scope, path, and whether to overwrite an
 existing file. It reads complete retained logs for that scope, not just the visible

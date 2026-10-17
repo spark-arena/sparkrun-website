@@ -148,7 +148,7 @@ gtag('config', 'G-LPQWBYH74V');`,
                         {label: 'proxy', slug: 'cli/proxy'},
                         {label: 'plugins', slug: 'cli/plugins'},
                         {label: 'daemon', slug: 'cli/daemon'},
-                        {label: 'model-cache (advanced)', slug: 'cli/model-cache'},
+                        {label: 'model-cache', slug: 'cli/model-cache'},
                     ],
                 },
                 {

@@ -97,7 +97,7 @@ Recipes can be local names, file paths, URLs, or [Spark Arena](https://spark-are
 | `sparkrun cluster default` | Show the current default cluster |
 | `sparkrun cluster status` | Show sparkrun containers running on cluster hosts |
 | `sparkrun cluster check-job <target>` | Check if a job is running (exit 0 = running, 1 = not) |
-| `sparkrun cluster monitor` | Live host metrics and interactive workload logs with search and export |
+| `sparkrun cluster monitor` | Live host metrics with sensor history and interactive workload logs with search and export |
 | `sparkrun cluster inspect [name]` | Show effective cluster config and check remote cache dirs |
 | `sparkrun cluster import svd <path>` | Import a spark-vllm-docker `.env` file into a cluster (aliased as `eugr`) |
 
@@ -185,7 +185,7 @@ gated behind a feature flag and is hidden until enabled. See
 | --- | --- |
 | `sparkrun plugins list/add/update/remove/rollback` | [Managed plugin commands](/cli/plugins/); use one subcommand at a time |
 | `sparkrun daemon` | [Daemon lifecycle and client](/cli/daemon/); optional feature, direct CLI remains default |
-| `sparkrun model-cache` | [Model-cache commands](/cli/model-cache/); advanced help visibility |
+| `sparkrun model-cache` | [Model-cache commands](/cli/model-cache/); inspect, repair, adopt, retain, prune, and delete cached models |
 | `sparkrun setup ssh-rotate-keys` | [Confirmed identity rotation](/cli/setup-commands/#ssh-server-identity-rotation) |
 
 Show advanced help with `SPARKRUN_ADVANCED=1`. Feature gates remain separate from

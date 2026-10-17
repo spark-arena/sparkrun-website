@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync bundled operation entries from core's generated DAEMON_API.md inventory.
+"""Sync bundled operation entries from core's reference and cache declarations.
 
 Reads Markdown and literal source metadata without importing or running Sparkrun.
 """
@@ -36,6 +36,59 @@ def descriptions_for(reference):
     if overlap:
         raise ValueError(f'Review supplemental descriptions now provided by core: {sorted(overlap)}')
     return descriptions | supplemental
+
+
+def cache_inventory(reference):
+    """Read current cache registrations, even when upstream Markdown lags them.
+
+    These bindings have literal fields, job kind and the default auto
+    reservation. Read their declarations without importing operation handlers.
+    """
+    source = reference.parent.parent / 'src/sparkrun/daemon'
+    tree = ast.parse((source / 'model_cache_ops.py').read_text())
+    bindings = next(node.value for node in tree.body
+                    if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == 'BINDINGS' for target in node.targets))
+    specs = []
+    for binding in bindings.elts:
+        if not (isinstance(binding, ast.Call) and isinstance(binding.func, ast.Name)
+                and binding.func.id == 'ModelCacheBinding' and len(binding.args) == 5):
+            raise ValueError('Unexpected model-cache binding declaration')
+        name, _, scope, forwarded, required = map(ast.literal_eval, binding.args)
+        keywords = {kw.arg: kw.value for kw in binding.keywords}
+        request_fields = ast.literal_eval(keywords['request_fields']) if 'request_fields' in keywords else ''
+        overrides = ast.literal_eval(keywords['overrides']) if 'overrides' in keywords else {}
+        specs.append((name, scope, request_fields + ' ' + forwarded, required, overrides))
+    tree = ast.parse((source / 'request_fields.py').read_text())
+    schemas = next(ast.literal_eval(node.value) for node in tree.body
+                   if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == 'FIELD_SCHEMAS' for target in node.targets))
+    rows = []
+    for name, scope, fields, required, overrides in sorted(specs):
+        if not name.startswith('model_cache.'):
+            continue
+        arguments = []
+        for field in fields.split():
+            schema = overrides.get(field, schemas[field])
+            datatype = schema['type']
+            if datatype == 'array':
+                datatype = schema['items']['type'] + '[]'
+            marker = '!' if field in required.split() else ''
+            arguments.append(f'`{field}{marker}: {datatype}`')
+        path = '/v1/' + name.replace('.', '/')
+        rows.append(f'| `{name}` | `{path}` | job / {scope} | auto | {", ".join(arguments)} |')
+    if not rows:
+        raise ValueError('No model-cache registrations found')
+    section = '\n'.join([
+        '### model_cache', '',
+        '| Operation | POST alias | Kind / permission | Reservation | Arguments (`!` required) |',
+        '| --- | --- | --- | --- | --- |', *rows, '', '',
+    ])
+    updated, count = re.subn(r'^### model_cache\n.*?(?=^### |^## |^<!-- END)',
+                            lambda match: section, reference.read_text(), flags=re.M | re.S)
+    if count != 1:
+        raise ValueError(f'Expected one model-cache inventory section, found {count}')
+    return updated
 
 
 def render(reference, descriptions):
@@ -118,7 +171,7 @@ def main():
     parser.add_argument('--reference', type=Path, required=True, help="Core docs/DAEMON_API.md")
     parser.add_argument('--check', action='store_true', help='Check without writing')
     args = parser.parse_args()
-    generated, count = render(args.reference.read_text(), descriptions_for(args.reference))
+    generated, count = render(cache_inventory(args.reference), descriptions_for(args.reference))
     original = PAGE.read_text()
     before, remainder = original.split(BEGIN, 1)
     _, after = remainder.split(END, 1)
@@ -126,7 +179,7 @@ def main():
     if args.check:
         if original != updated:
             raise SystemExit('Daemon operation entries are stale; rerun without --check')
-        print(f'Daemon API entries match all {count} bundled operations in {args.reference}')
+        print(f'Daemon API entries match all {count} bundled operations in the reference and cache declarations')
     else:
         PAGE.write_text(updated)
         print(f'Synced {count} operation entries to {PAGE}')

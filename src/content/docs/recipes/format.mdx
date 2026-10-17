@@ -615,8 +615,22 @@ trusted; an unavailable or untrusted format makes the include fail.
 | `overrides` | Append child entries after the base entries |
 | Explicit `null` | Delete the inherited key |
 
-Changing `model` drops inherited model metadata. Inherited registry mods keep
-their source registry. Trust follows the least-trusted member of the chain,
+Changing `model` **preserves inherited metadata**, including declared weight and
+KV-cache dtypes. Child metadata still merges key by key. Review parameter counts,
+architecture fields, model URLs, and other model-specific estimates when switching
+models: override changed values or set individual fields such as `model_params`
+to `null` to remove them.
+
+To clear the entire inherited block and let automatic model detection refill
+available fields:
+
+```yaml
+include: base
+model: org/different-model
+metadata: null
+```
+
+Inherited registry mods keep their source registry. Trust follows the least-trusted member of the chain,
 so a local wrapper does not grant trust to a third-party base. Legacy v1 recipes
 cannot participate in includes.
 

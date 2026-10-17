@@ -74,7 +74,7 @@ and config/cache namespaces determine policy. The controller identity derives
 from a private seed and canonical config directory; it is not a user-selectable
 controller name. Moving/copying the directory changes that identity. Child
 processes inherit the selected profile/config. See the pinned
-[application profile guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/APPLICATION_PROFILES.md).
+[application profile guide](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/APPLICATION_PROFILES.md).
 
 Use `sparkrun.application.child_environment()` when launching a child process
 that must retain the selected application binding.
@@ -127,8 +127,8 @@ separately documented contracts.
 | Plugin and capability policy | `api.plugins.enable/disable`, `api.features.enable/disable/reset` |
 | Monitoring | `live_monitor`, `open_live_monitor`, `open_telemetry` |
 | Setup | `api.setup`: probes/plans, apply/undo, manifests, SSH audits and rotation |
-| Model cache | `sparkrun.api.model_cache`: `resolve_manifest`, `inspect_model`, `import_manifest`, `repair_model` |
-| Model-cache retention | `sparkrun.api.model_cache`: `inventory_cache`, `prune_cache`, `pin_revision`, `reconcile_claim` |
+| Model cache | `sparkrun.api.model_cache`: `resolve_manifest`, `inspect_model`, `import_manifest`, `import_model`, `repair_model` |
+| Model-cache retention | `sparkrun.api.model_cache`: `inventory_cache`, `adopt_cache`, `prune_cache`, `delete_model`, `pin_revision`, `reconcile_claim` |
 | Gateways | `api.proxy`: lifecycle, model queries, aliases and capability-dependent management |
 | Runtime dialects | `recipe_protocols(recipe)` returns `RecipeProtocols` without planning or host probes |
 | Readiness and endpoint discovery | `wait_ready`, `post_launch`, `discovery_snapshot` (experimental) |
@@ -143,7 +143,7 @@ Keep source provenance: a path to a staged import does not automatically make it
 a trusted local recipe. Refreshing registries or importing is separate from a
 read-only catalog query. Listing does not clean up abandoned imports; a new import
 or explicit `cleanup_catalog_imports()` performs that sweep. See the pinned
-[catalog guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/CATALOG_API.md)
+[catalog guide](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/CATALOG_API.md)
 for query/pagination and retain/cleanup examples.
 
 ### Setup plans and execution
@@ -153,7 +153,7 @@ findings before applying steps. Probe/readiness and execution share the step mod
 probing never authorizes mutation. Apply/undo return per-step outcomes and preserve
 recovery manifests. Obtain confirmation and per-host sudo credentials in the
 frontend. See [SSH Setup](/getting-started/ssh-setup/) and the pinned
-[headless setup examples](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
+[headless setup examples](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/SETUP_STEPS.md#running-setup-from-another-frontend).
 
 The following experimental helpers expose the decisions used by the setup CLI:
 
@@ -195,10 +195,53 @@ runs when the service starts. Controller-local `env_file` values are resolved at
 export and written into the head node's private cluster file. See
 [export systemd](/cli/export/#export-systemd).
 
+### Import model manifests
+
+`model_cache.import_manifest(request, manifest, ...)` imports supplied inventory
+without contacting the origin. `import_model` accepts that same inventory or
+can resolve it once with explicit consent:
+
+```python
+from sparkrun.api import model_cache
+from sparkrun.models.artifacts import ModelArtifactRequest
+
+request = ModelArtifactRequest("org/model", revision="COMMIT")
+reports = model_cache.import_model(
+    request,
+    cache_dir="/models/hf",
+    fetch_manifest=True,
+)
+for report in reports:
+    print(report.host, report.status, report.complete)
+```
+
+This example authorizes origin resolution on the controller and imports into its
+local cache. Pass `hosts`, `ssh_kwargs`, or `session` for remote targets. Resolution
+uses one immutable inventory for every target and may download a weight index,
+never model weights. Omit `revision` only when you intend to resolve the origin's
+current default revision.
+
+| Parameter | Contract |
+| --- | --- |
+| `manifest` | Optional `ModelArtifactManifest`; when supplied, skips origin resolution and the confirmation callback |
+| `fetch_manifest` | Defaults to `False`; must be `True` when no manifest is supplied |
+| `offline` | Defaults to `False`; `True` requires a supplied manifest even with fetch consent |
+| `confirm_manifest` | Optional callback receiving the resolved manifest before target caches are opened; returning `False` raises `ModelArtifactError` and leaves target manifests unchanged |
+| `token` | Explicit origin credentials override local HF configuration; used only for resolution |
+| `checksums` | Hash selected existing files during import; defaults to `False` |
+
+Both calls return `tuple[CacheValidationReport, ...]`. An incomplete cache can
+return normally after the valid manifest is saved; inspect `complete` and `status`
+before proceeding. Invalid supplied metadata and origin failures never fall back
+to inferred local inventory. Import does not repair weights or enroll snapshots
+in retention. The frontend owns consent and presentation; see
+[manifest import](/cli/model-cache/#import-a-manifest-or-resolve-one-online).
+
 ### Model-cache usage and retention
 
-Cache management operates on each host's HF home. Inventory is read-only, and
-`prune_cache` defaults to a preview with a seven-day minimum age:
+Cache management operates once per detected HF cache location, grouping hosts
+that share a cache. Inventory is read-only, and `prune_cache` defaults to a preview
+with a seven-day minimum age:
 
 ```python
 from sparkrun.api import model_cache
@@ -211,19 +254,24 @@ preview = model_cache.prune_cache(
     max_bytes=536870912000,
 )
 for report in preview:
-    print(report["host"], report["planned_bytes"], report["target_met"])
+    print(report.location, report.planned_bytes, report.target_met)
 ```
 
 Reports are typed `CacheReport`/`CacheEntry` objects that also support mapping
-access. Use stable `reason_code` values for automation, and inspect budget and
-estimate-kind fields before interpreting byte counts.
+access. `report.location` is a `CacheLocation` with `key`, `kind` (`network`,
+`local`, or `unknown`), `source`, `hosts`, per-host `paths`, and `verified`.
+The top-level `host` is the execution representative. Mutations verify shared
+access before operating once per location. Use stable `reason_code` values for
+automation, and inspect budget and estimate-kind fields before interpreting bytes.
 
 The default host is `localhost`; pass `hosts`, `ssh_kwargs`, or an existing
 `session` for remote caches. Applying cleanup requires `dry_run=False`.
-`max_bytes` budgets private tracked-snapshot allocations; `min_free_bytes` targets
-filesystem free space. Check `target_met` in every host report even if the call
-returns normally. Shared HF blobs, pins, active claims, and unknown content remain
-protected.
+These Python calls do not select a default cluster automatically.
+`max_bytes` budgets private tracked allocations, including blobs used only by a
+selected snapshot; `min_free_bytes` targets filesystem free space. Check
+`target_met` in every cache report even if the call returns normally. Pruning
+preserves pins, active claims, unknown content, busy caches, active downloads,
+and blobs still referenced elsewhere.
 
 `pin_revision(request, ..., pinned=True)` takes a `ModelArtifactRequest` with a
 full immutable commit; `pinned=False` removes its retention pin.
@@ -232,6 +280,95 @@ claim after the caller has verified all of its workloads and launches stopped.
 It does not delete model files or discover inactivity. See
 [Model Cache Management](/advanced/cache-management/#usage-tracking-and-retention) for
 tracking, protection, and host requirements.
+
+#### Adopt or explicitly delete snapshots
+
+Both APIs preview by default and return `tuple[CacheReport, ...]`:
+
+```python
+from sparkrun.api import model_cache
+from sparkrun.models.artifacts import ModelArtifactRequest
+
+request = ModelArtifactRequest("org/model", revision="COMMIT")
+adoption = model_cache.adopt_cache(
+    request, cache_dir="/models/hf", dry_run=True, pinned=True,
+)
+deletion = model_cache.delete_model(
+    request, cache_dir="/models/hf", dry_run=True,
+)
+```
+
+`adopt_cache` accepts either a request or `all_models=True`, never both. Its
+options include `offline=False`, `last_used="now"` (or `"mtime"`), `pinned=False`,
+`token`, and an `endpoint` for all-model adoption. It validates present files and
+writes usage records with `dry_run=False`; it never downloads weights or creates
+launch manifests. Offline adoption requires HF blob-linked entries.
+
+`delete_model` deletes one requested revision or all revisions when
+`request.revision` is unset. Applying with `dry_run=False` first previews every
+cache and returns refusal reports without deleting anything if any target is
+blocked. Pins, age, and untracked status do not protect explicit deletion.
+`force=True` overrides workload claims, but never active downloads or publication
+locks. Saved manifests and blobs referenced elsewhere are preserved.
+
+The frontend owns confirmation. Pass the confirmed revision set as
+`allowed_revisions` when applying deletion to reject revisions that appeared
+after its preview. The same guard is available on daemon `model_cache.delete`.
+An empty collection permits no revisions; omission uses the model/revision
+selection at execution time. Inspect
+`target_met`, `reason_code`, and actions such as `would_adopt` / `adopted` or
+`would_delete` / `deleted`; a normal return is not evidence that a mutation occurred.
+
+### Live monitoring and telemetry history
+
+`api.open_live_monitor` opens a reusable `LiveMonitorSession` combining telemetry
+and workload occupancy. Keep the session open while your UI polls it, then close
+it or use a context manager:
+
+```python
+from sparkrun import api
+
+with api.open_live_monitor(cluster="mylab", interval=2) as monitor:
+    frame = monitor.frame()
+    for activity in frame.hosts:
+        points = monitor.history(activity.host)
+        print(activity.host, len(points))
+    series = monitor.history_snapshot()
+```
+
+`frame()` is a nonblocking latest snapshot. `history(host)` returns a copied list
+of `(recorded_at, MonitorSample)` tuples, oldest first. The timestamp is the
+controller's wall-clock record time, suitable for a shared chart axis; each
+sample's backend timestamp may use a different clock or format.
+
+History accrues independently of `frame()` calls. Omit `history_points` or pass
+`None` to use `monitor.history_points` from configuration (default 120, about four
+minutes at the default two-second interval). An explicit `history_points` argument
+overrides configuration; values below one are floored to one. The session's
+`history_points` property reports the effective capacity.
+
+Missing samples and repeated reads of the same sample object are skipped, so a
+stalled stream does not extend history with stale readings. The list can be
+empty just after opening; an unknown host raises `KeyError`. Recorded data remains
+readable after collection stops. History is session-local, not durable storage or
+part of `MonitorFrame`.
+
+`history_snapshot()` returns all selected hosts in order as a `list[HostHistory]`,
+with each host included once. Each `HostHistory` has `host` and an oldest-first
+tuple of `HistoryPoint(recorded_at, sample)` values. These DTOs support wire
+serialization and back the daemon's
+[initial monitor history event](/developer-reference/daemon-api/#monitor-history-and-live-frames).
+
+`MonitorSample` includes `cpu_name`, `gpu_count`, `net_send_bytes_s`, and
+`net_recv_bytes_s` alongside CPU, memory, GPU, power, and temperature metrics.
+These fields are strings; unavailable values are empty. Network rates are bytes
+per second in the API, while the TUI displays adaptive bits-per-second units.
+Backend support determines which metrics are populated.
+
+`status_interval` controls occupancy polling separately (default
+`max(interval * 2, 5)` seconds). `api.live_monitor` accepts the same history-window
+option and yields frames, closing its session when the generator ends. Use
+`open_live_monitor` when your frontend needs direct access to historical points.
 
 ## Workload identity and teardown
 
@@ -419,5 +556,5 @@ For operation events and subscribers see [Feedback](/developer-reference/feedbac
 Use public imports instead of leading-underscore modules. Pin compatible core and
 integration releases together. This Python boundary does not retire saved recipe,
 configuration, or benchmark formats by implication. The full pinned
-[migration guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/DISTRIBUTION_API_MIGRATION.md)
+[migration guide](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/DISTRIBUTION_API_MIGRATION.md)
 records detailed contract changes.

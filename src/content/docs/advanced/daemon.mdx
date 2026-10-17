@@ -328,6 +328,12 @@ status/sleep/wake accessed through these core operations.
   `hosts` remains the full workload topology. See [Log Streaming API](/developer-reference/logging-api/).
 - `GET /v1/streams/monitor`: reference-counted monitor sessions, latest frame,
   five-second teardown linger. Disconnect/cancellation closes quiet reads too.
+  A `history` event first supplies the shared session's recent per-host samples;
+  live `frame` events follow. Set `monitor.history_points` in `config.yaml` to
+  change the per-host capacity (default 120). This is an in-memory window, not
+  durable replay. New subscriptions use fresh sessions when the cluster's
+  executor or transport configuration changes. See
+  [monitor stream details](/developer-reference/daemon-api/#monitor-history-and-live-frames).
 
 Jobs, events, prompt metadata, and idempotency records live in
 `<config-root>/daemon/<binding>/jobs.sqlite3` (WAL). Local discovery and any Unix
@@ -611,7 +617,7 @@ bridge workers; switching back checks daemon jobs admitted under manager
 placement/provider records remain readable; uncertain effects need reconciliation.
 
 For a separately managed gateway, see the connection descriptor in the
-[source daemon guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/DAEMON.md#gateway-discovery-and-workload-recovery).
+[source daemon guide](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/DAEMON.md#gateway-discovery-and-workload-recovery).
 
 ## HTTP workflow
 

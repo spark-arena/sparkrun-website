@@ -5,7 +5,7 @@ description: HTTP routes, operation arguments, permissions, job and result contr
 
 The daemon exposes authenticated JSON operations and SSE streams over HTTP
 protocol **1** (`/v1`). This reference covers the API bundled with sparkrun:
-**84 core operations** and **8 experimental Kubernetes operations**. Availability depends on
+**86 core operations** and **8 experimental Kubernetes operations**. Availability depends on
 plugin loading policy, capability flags, and the caller's permissions.
 Use the running daemon's `GET /v1/ops` response to discover its supported API.
 
@@ -210,7 +210,7 @@ from generated operation aliases.
 | GET | `/v1/jobs/{id}/events` | job access | Durable SSE; `Last-Event-ID`; expired cursor → 410, later expiry → `gap` event. |
 | GET | `/v1/events` | read + job visibility | SSE snapshots of visible jobs every 2 seconds; no inventory stream or replay cursor. |
 | GET | `/v1/streams/logs` | read | SSE; optional `workload_id`, `recipe`, comma-separated `hosts`, `cluster`, `host`, `container`, `source_id`, `scope=head/all`, nonnegative `tail`, `follow=true/false`. Disconnect cancels readers. |
-| GET | `/v1/streams/monitor` | read | SSE; optional comma-separated `hosts`, `cluster`, `interval` (1–60 seconds). Shared latest frames, not durable history. |
+| GET | `/v1/streams/monitor` | read | SSE; optional comma-separated `hosts`, `cluster`, `interval` (1–60 seconds). Initial in-memory `history` backfill, then live `frame` events. |
 | GET | `/v1/reservations` | admin | Execution claims and verified owner liveness; dead claims remain until reconciled. |
 | POST | `/v1/reservations/{owner}/reconcile` | admin | `{"acknowledge_effects":true}`; releases only a verified dead owner's claims. |
 | GET | `/v1/snapshots/{name}` | read | Advisory snapshot of `discovery.snapshot`; no other selector is accepted. |
@@ -238,6 +238,45 @@ for an event must be fetched from the job endpoint.
 `/v1/events` sends snapshots of visible jobs every two seconds, without a replay
 cursor. Logs and monitoring have their own streams and are not job feedback.
 No combined log/monitor or MCP route is mounted.
+
+### Monitor history and live frames
+
+A monitor subscription first receives a `history` event containing the shared
+session's recent telemetry. It can be empty when collection has just started:
+
+```json
+{
+  "type": "history",
+  "queried_at": 1792250000.0,
+  "series": [
+    {"host": "spark-a", "points": []}
+  ]
+}
+```
+
+Each populated `points` entry contains `recorded_at` (controller wall-clock
+seconds) and `sample` (a telemetry sample), ordered oldest first. Samples include
+hardware identity and network rate fields alongside CPU, memory, and GPU metrics.
+Network rates are in bytes per second; unavailable sample values are empty strings.
+
+Live events then use `type: "frame"`, `queried_at`, and `hosts` with current
+telemetry and workload occupancy. Dispatch on `type`: history uses `series`,
+so it must not be interpreted as a frame or an empty host inventory.
+These types are fields in the SSE `data` JSON, not named SSE events; an
+`EventSource` client reads them from its normal `message` handler.
+
+The history capacity comes from `monitor.history_points` in the daemon's
+configuration (default 120 samples per host). It is not an HTTP query parameter.
+Repeated reads of the same sample do not add history points. Late subscribers
+can reuse an existing session's history, including across overlapping host
+selections with matching settings. A new subscription after an executor or
+transport configuration change opens fresh sessions rather than reusing stale
+connections. Sessions linger for five seconds after their final subscriber leaves.
+
+History is neither persisted nor replayed by `Last-Event-ID`; reconnecting only
+receives whatever remains in a current shared session. See the
+[Python monitoring API](/developer-reference/python-api/#live-monitoring-and-telemetry-history)
+for typed history values and configuration overrides.
 
 ## Diagnostic bundles
 
@@ -288,6 +327,7 @@ Use canonical names such as `workloads.run`; retired flat daemon names have no a
 | `discovery.snapshot` | Scoped endpoint observations with original timestamp, host coverage and errors. |
 | `model_cache.list` / `model_cache.prune` | Cache-local usage/protection inventory / preview or apply LRU cleanup. |
 | `model_cache.pin` / `model_cache.reconcile` | Retain an immutable revision / explicitly release an inactive workload claim. |
+| `model_cache.adopt` / `model_cache.delete` | Enroll existing downloads in retention tracking / explicitly remove a model or revision. |
 
 `cluster.observe` and `cluster.report` can omit `hosts` to use the selected
 cluster or configured defaults. `workloads.stop_all` requires explicit `hosts`
@@ -325,15 +365,52 @@ Warnings describe routing issues following a successful import and do not fail
 the sweep or delay its next normal interval. Safe gateway rejection messages
 appear in `last_error`; unexpected exception details remain class-name-only.
 
+### Model-cache manifest imports
+
+`POST /v1/model_cache/import` is an `operate`-scoped job. Supply a `manifest` for
+an import without origin access. Omitting it requires explicit
+`fetch_manifest: true`, for example:
+
+```json
+{
+  "model": "org/model",
+  "revision": "COMMIT",
+  "cache_dir": "/models/hf",
+  "hosts": ["spark-a", "spark-b"],
+  "fetch_manifest": true
+}
+```
+
+Replace `COMMIT` with the revision you intend to check. The daemon resolves
+metadata once using server-side HF credentials, then imports the same immutable
+inventory on all targets without an interactive prompt. It may download a weight
+index, never model weights. `offline: true` requires a supplied manifest even
+with fetch consent. Invalid manifests and origin failures never fall back to
+inferred local file inventories.
+
+To review metadata first, call `model_cache.resolve` and submit its result as
+the `manifest` in a later import. Omitting `revision` resolves the origin's
+current default revision. Incomplete imports can save the manifest and complete
+the job successfully while returning incomplete validation reports; inspect
+their `complete` and `status` fields. Import does not repair weights or refresh
+retention usage. Tokens and Python confirmation callbacks are not request fields.
+
 ### Model-cache retention
 
 `model_cache.list` requires `read`, `model_cache.pin` requires `operate`, and
-`model_cache.prune` / `model_cache.reconcile` require `admin`. All four are jobs
+`model_cache.prune`, `model_cache.reconcile`, `model_cache.adopt`, and
+`model_cache.delete` require `admin`. All six are jobs
 and return the usual 202 acknowledgement before their final reports are available.
+
+Supply `cache_dir` as the targets' HF home and `hosts` as the resolved host list.
+Unlike the CLI, these operations do not accept `cluster` or resolve a default
+cluster; omitting `hosts` targets `localhost`. Cache mutations verify shared
+access and operate once per detected cache location.
 
 Prune defaults to `dry_run: true` and `min_age_days: 7`. Set `dry_run: false` to
 apply a reviewed policy. Without a byte target it selects every eligible revision
-older than the minimum age; `max_bytes` budgets private tracked-snapshot allocations,
+older than the minimum age; `max_bytes` budgets private tracked allocations,
+including blobs used only by the selected snapshot,
 while `min_free_bytes` targets filesystem free space. Both are per-cache targets.
 Protection rules are preserved even when a target cannot be met.
 
@@ -343,12 +420,50 @@ require a full immutable revision. Reconciliation additionally requires an exact
 covered by that claim and stopping all associated workloads and launches.
 It removes the protection record without deleting model files.
 
-Final results are arrays of host reports with `cache_root`, `entries`, `dry_run`,
+`model_cache.adopt` takes either `model` (optionally `revision`) or
+`all_models: true`. It previews by default; `dry_run: false` writes usage records
+without downloading or moving files. `offline: true` requires HF blob-linked
+entries instead of contacting the origin. `last_used` is `now` by default or
+`mtime`; `pinned: true` protects adopted revisions from pruning. Adoption does
+not create a launch manifest, and use by other tools does not refresh retention age.
+
+`model_cache.delete` requires `model`; optional `revision` narrows the selection
+to a commit or ref. It also defaults to `dry_run: true`. Clients must obtain their
+own confirmation before submitting `dry_run: false`; there is no CLI-style
+confirmation prompt. Pins, age, and tracked status do not block deletion.
+`force: true` overrides workload claims, but never active downloads or publication
+locks. Apply preflights all targets and returns refusal reports if any is blocked;
+later failures can still leave partial progress. Saved manifests are retained.
+
+Pass `allowed_revisions` as the array of immutable revisions from the confirmed
+preview when applying deletion. A revision that appeared afterward is refused.
+`[]` authorizes no revisions; omitting this field applies to the model/revision
+selection at execution time. This guard does not bypass claims, locks, or other
+deletion checks.
+
+For example, preview adoption with an admin credential:
+
+```json
+{
+  "cache_dir": "/models/hf",
+  "hosts": ["spark-a", "spark-b"],
+  "model": "org/model",
+  "dry_run": true,
+  "pinned": true
+}
+```
+
+Send this body to `POST /v1/model_cache/adopt`, then read the job's final result.
+
+Final results are arrays of cache reports with `cache_root`, `entries`, `dry_run`,
 `planned_bytes`, `reclaimed_bytes`, `free_bytes`, and `target_met`. Prune adds
 `free_bytes_after`. Entries describe tracking, usage, pins, claims, eligibility,
-protection `reason`, and any `action`. A successful job can still report
-`target_met: false`; clients must inspect the report. Shared HF blobs are never
-deleted, and shared-cache reports must not be summed as independent copies.
+protection `reason_code` / `reason`, and any `action`, including `would_adopt`,
+`adopted`, `would_delete`, and `deleted`. `location` carries `key`, `kind`,
+`source`, `hosts`, per-host `paths`, and `verified`; `host` is the execution
+representative. Count a shared location once, not once per participating host.
+A successful job can still report `target_met: false`; clients must inspect it.
+Cleanup can remove exclusive blobs, while blobs referenced elsewhere are kept.
 See [Model Cache Management](/advanced/cache-management/#usage-tracking-and-retention).
 
 {/* BEGIN DAEMON OPERATION REFERENCE */}
@@ -814,10 +929,55 @@ Observe healthy workload endpoints with coverage and errors; metadata-only mode 
 
 ### model_cache
 
+<details id="model_cache-adopt">
+<summary><code>model_cache.adopt</code> — job / admin</summary>
+
+Preview or enroll existing untracked model snapshots in usage tracking without downloading or moving files.
+
+**POST** `/v1/model_cache/adopt`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `model` | `string` | No |
+| `revision` | `string` | No |
+| `endpoint` | `string` | No |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `all_models` | `boolean` | No |
+| `dry_run` | `boolean` | No |
+| `offline` | `boolean` | No |
+| `last_used` | `string` | No |
+| `pinned` | `boolean` | No |
+
+</details>
+
+<details id="model_cache-delete">
+<summary><code>model_cache.delete</code> — job / admin</summary>
+
+Preview or explicitly delete a model or revision, preserving blobs still used by other snapshots.
+
+**POST** `/v1/model_cache/delete`
+
+**Reservation:** `auto`. **Operation version:** 1.
+
+| Argument | Type | Required |
+| --- | --- | --- |
+| `model` | `string` | Yes |
+| `revision` | `string` | No |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
+| `dry_run` | `boolean` | No |
+| `force` | `boolean` | No |
+| `allowed_revisions` | `string[]` | No |
+
+</details>
+
 <details id="model_cache-import">
 <summary><code>model_cache.import</code> — job / operate</summary>
 
-Validate and import a supplied model manifest into the selected caches.
+Import a supplied manifest or explicitly resolve one from the model origin, then report target-cache completeness without downloading weights.
 
 **POST** `/v1/model_cache/import`
 
@@ -830,10 +990,12 @@ Validate and import a supplied model manifest into the selected caches.
 | `endpoint` | `string` | No |
 | `projector` | `string` | No |
 | `file_selection` | `string` | No |
-| `manifest` | `object` | Yes |
+| `manifest` | `object` | No |
 | `cache_dir` | `string` | Yes |
 | `hosts` | `string[]` | No |
 | `checksums` | `boolean` | No |
+| `fetch_manifest` | `boolean` | No |
+| `offline` | `boolean` | No |
 
 </details>
 
@@ -886,11 +1048,11 @@ Add or remove a retention pin for an exact model revision on the selected hosts.
 
 | Argument | Type | Required |
 | --- | --- | --- |
-| `cache_dir` | `string` | Yes |
-| `hosts` | `string[]` | No |
 | `model` | `string` | Yes |
 | `revision` | `string` | Yes |
 | `endpoint` | `string` | No |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
 | `pinned` | `boolean` | No |
 
 </details>
@@ -926,11 +1088,11 @@ Release an exact stale cache claim after the caller confirms its workloads are i
 
 | Argument | Type | Required |
 | --- | --- | --- |
-| `cache_dir` | `string` | Yes |
-| `hosts` | `string[]` | No |
 | `model` | `string` | Yes |
 | `revision` | `string` | Yes |
 | `endpoint` | `string` | No |
+| `cache_dir` | `string` | Yes |
+| `hosts` | `string[]` | No |
 | `claim` | `string` | Yes |
 | `confirm_inactive` | `boolean` | Yes |
 
@@ -2311,6 +2473,6 @@ stage, host, counter, and metric fields. Operation-scoped legacy `type: "log"`
 messages also carry `message`. These events describe operation progress, such as
 image transfer or restore; container output uses the log stream.
 
-The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/DAEMON_API.md)
+The source [daemon API reference](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/DAEMON_API.md)
 contains the corresponding operation inventory. The running daemon's discovery and
 OpenAPI schemas remain authoritative for its installed versions and plugins.

@@ -389,13 +389,17 @@ weights, metadata, images, or tools.
 
 ## Model-cache cleanup does not meet its target
 
-Use `sparkrun model-cache list` to inspect pins, workload claims, tracked status,
-and each revision's protection reason. Shared HF blobs are never deleted, so
-removing a symlink-based snapshot may free no model-weight bytes. `--max-bytes`
-counts private tracked allocations; `--min-free-bytes` measures the whole cache
-filesystem. Inspect `target_met` in the report.
+Use `sparkrun model-cache list --all` on your default cluster to inspect pins,
+workload claims, tracked status, and each revision's protection reason. Pruning
+can remove exclusive blobs, but keeps blobs referenced by other snapshots.
+`--max-bytes` counts private tracked allocations, including exclusive blobs;
+`--min-free-bytes` measures the whole cache filesystem. Inspect `target_met` and
+the cache location in each report; shared locations are reported once.
 
-Unknown content, busy caches, and active claims remain protected. Retry normal
+Unknown content, active downloads, busy caches, and active claims remain protected.
+Use `model-cache adopt` to enroll verified existing downloads before pruning them.
+For deliberate removal regardless of age, pin, or tracking, preview
+`model-cache delete` instead. Retry normal
 stop for a known workload; release an orphaned claim only after checking every
 host it names. See [Model Cache Management](/advanced/cache-management/#preview-and-apply-lru-cleanup)
 for eligibility, byte targets, and reconciliation.

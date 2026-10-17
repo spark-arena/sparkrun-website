@@ -65,8 +65,9 @@ Setup step flags cover `docker`, `docker_group`, `nvidia_container`, `nvidia_cdi
 `host_ipc`, `earlyoom`, `sudoers`, `ssh_identity`, `ssh_mesh`, `cx7`, and `rdma`.
 Enabled steps still require an applicable hardware/executor plan.
 
-`SPARKRUN_ADVANCED=1` exposes advanced help such as [model-cache](/cli/model-cache/);
-it does not enable capability flags. `plugins add` can enable the external-loader
+`SPARKRUN_ADVANCED=1` exposes advanced help; it does not enable capability flags.
+[model-cache](/cli/model-cache/) is visible in normal help and shell completion.
+`plugins add` can enable the external-loader
 gate after source consent; `--enable` separately enables plugin loading.
 
 Bundled LiteLLM, OCI Relay, and Arena plugins load by default on every channel.

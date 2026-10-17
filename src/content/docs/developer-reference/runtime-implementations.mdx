@@ -225,6 +225,20 @@ stderr separate from workload output, and honor full-history, cancellation, and
 nonzero reader exit semantics in executor `read_logs_cmd()` implementations.
 See [Log Streaming API](/developer-reference/logging-api/) for the consumer contract.
 
+### Runtime version reporting
+
+Override `version_commands()` to return a mapping of version labels to shell
+commands, merging `super().version_commands()` to retain the common GPU stack
+probes. During collection, each command runs inside the serving container and
+only its **last non-empty output line** becomes the version value. Print the
+version last so import-time banners or engine initialization messages do not
+replace it in workload metadata and benchmark reports.
+
+The common probes distinguish `nccl_torch` (PyTorch's compiled-against version)
+from `nccl_lib` (the dynamically loaded system library). Preserve those labels;
+the versions can differ. Builder metadata uses a separate multiline collection
+path.
+
 ## Environment, hooks, and runtime caches
 
 Use `get_common_env()`, `get_solo_env()`, and `get_cluster_env(head_ip, num_nodes)`
@@ -322,8 +336,8 @@ Use these built-in implementations as references:
 
 | Implementation | Useful pattern |
 | --- | --- |
-| [RuntimePlugin base](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/runtimes/base.py) | Required command hook, shared solo lifecycle, validation, logs, and caches |
-| [Modular MAX](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/runtimes/modular_max.py) | Single-host placement and local-GPU validation |
-| [SGLang](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/runtimes/sglang.py) | Native multi-node commands and readiness declarations |
-| [vLLM distributed](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/runtimes/vllm_distributed.py) | Placement-aware rank commands and communication environment |
-| [llama.cpp](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/runtimes/llama_cpp.py) | GGUF model paths, RPC workers, and custom log naming |
+| [RuntimePlugin base](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/runtimes/base.py) | Required command hook, shared solo lifecycle, validation, logs, and caches |
+| [Modular MAX](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/runtimes/modular_max.py) | Single-host placement and local-GPU validation |
+| [SGLang](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/runtimes/sglang.py) | Native multi-node commands and readiness declarations |
+| [vLLM distributed](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/runtimes/vllm_distributed.py) | Placement-aware rank commands and communication environment |
+| [llama.cpp](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/runtimes/llama_cpp.py) | GGUF model paths, RPC workers, and custom log naming |

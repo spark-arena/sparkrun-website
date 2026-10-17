@@ -1,113 +1,220 @@
 ---
-title: sparkrun model-cache (advanced)
-description: Inspect and repair model caches, list usage, pin revisions, preview or apply LRU cleanup, and reconcile workload claims.
+title: sparkrun model-cache
+description: Inspect and repair model caches, adopt existing downloads, pin revisions, prune old snapshots, and explicitly delete models.
 ---
 
-Show this advanced group in help with `SPARKRUN_ADVANCED=1`. Visibility is separate
-from execution capability gates; the command path works when hidden.
+Manage model files and retention on your cluster. This command group appears in
+normal help and shell completion.
 
 ```bash
-SPARKRUN_ADVANCED=1 sparkrun model-cache --help
-sparkrun model-cache inspect org/model --revision COMMIT
+sparkrun model-cache list --cluster mylab
+sparkrun model-cache inspect org/model --revision COMMIT --cluster mylab
 ```
 
-Replace `org/model`, `COMMIT`, host names, and paths with your model’s values.
-Reports are structured JSON. Inspection/import exit nonzero for incomplete or
-unverified targets. Saved inventory records expectations, not a previous successful
-check; current files are checked again. See [Model Cache Management](/advanced/cache-management/).
+Replace `org/model`, `COMMIT`, cluster names, and paths with your values.
+Commands show readable tables by default; add `--json` for machine-readable
+reports. Inspection/import exit nonzero for incomplete or unverified targets.
+Saved inventory records expectations; current files are checked again. See
+[Model Cache Management](/advanced/cache-management/) for the full workflow.
 
 ## Commands and effects
 
 | Command | Effect |
 | --- | --- |
 | `inspect MODEL` | Offline, read-only observation; checks size/readability by default, hashes with `--checksum` |
-| `resolve MODEL --output PATH` | Resolve origin metadata online, download a small weight index if needed, and write the portable manifest |
-| `import MODEL --manifest FILE` | Write trusted expected inventory and report completeness; does not repair weights |
-| `repair MODEL` | Acquire/copy selected missing or damaged files, then validate every required target |
-| `list` | Read cache-wide inventory, usage, pins, and workload claims, including untracked snapshots |
+| `resolve MODEL --output PATH` | Resolve origin metadata on the controller, download a small weight index if needed, and write a portable manifest |
+| `import MODEL` | Import a reviewed manifest, or resolve one from the origin with confirmation, then report completeness; does not repair weights |
+| `repair MODEL` | Reuse, acquire, or copy selected missing/damaged files, then validate every required target |
+| `list` | Show tracked revisions, usage, pins, and workload claims; `--all` also shows untracked snapshots |
+| `adopt MODEL` | Preview enrolling existing untracked downloads; `--apply` writes their usage records |
 | `prune` | Preview eligible revisions in LRU order; `--apply` performs cleanup |
+| `delete MODEL` | Preview explicit removal, then ask for confirmation; `--dry-run` stops at the preview |
 | `pin MODEL --revision FULL_COMMIT` | Keep a tracked immutable revision; `--remove` removes its retention pin |
 | `reconcile MODEL --revision FULL_COMMIT --claim ID --confirm-inactive` | Release an exact workload claim after verifying inactivity; does not delete files |
 
-```bash
-sparkrun model-cache resolve org/model --revision COMMIT --output manifest.json
-sparkrun model-cache import org/model --revision COMMIT --manifest manifest.json
-sparkrun model-cache repair org/model --revision COMMIT --host node1 --host node2
-sparkrun model-cache inspect org/model --revision COMMIT --checksum
-sparkrun model-cache repair org/model --revision COMMIT --offline
-```
-
-Offline repair can copy available cluster artifacts. It cannot fetch missing
-metadata/dependencies, install tools, or contact the origin. Known damage is never
-accepted through legacy fallback. Repair dangling HF snapshot/shared-blob links
-and affected target files; avoid deleting whole caches. Permission failures need
-an access/ownership fix, not a download under a different identity.
-
 ## Cache host selection
 
-Every command accepts `--cache-dir` for the target's HF home (not `hub/`) and
-repeatable `--host` options using configured SSH credentials. The default host is
-`localhost`. `list`, `prune`, `pin`, and `reconcile` require Python 3 on Linux cache
-hosts; they never contact the model origin or install tools.
+Use `--cluster mylab`, or omit it to use your default cluster. Without a default
+cluster, commands use configured `default_hosts`, then fall back to `localhost`.
+The usual `--hosts` and `--hosts-file` overrides are also available. Cluster SSH
+settings apply.
+
+`--cache-dir` selects the target's **HF home**, not its `hub/` subdirectory. When
+omitted, sparkrun uses the cluster's cache directory or probes the head host's HF
+home, following normal launch behavior.
+
+`resolve` is the exception: it runs on the controller and has no host-selection
+options. Its `--cache-dir` refers to the controller's HF home.
+
+Inventory and retention operations run once per detected cache location. Hosts
+sharing a recognized network cache appear together in one report; separate local
+caches remain separate. Mutations verify shared access before acting. JSON reports
+include `location.hosts`, per-host `location.paths`, and `location.verified`.
+See [shared caches](/advanced/cache-management/#shared-cache-locations).
 
 ## Manifest command options
 
-The options below apply to `inspect`, `resolve`, `import`, and `repair`.
+```bash
+sparkrun model-cache resolve org/model --revision COMMIT --output manifest.json
+sparkrun model-cache import org/model --revision COMMIT --manifest manifest.json --cluster mylab
+sparkrun model-cache repair org/model --revision COMMIT --cluster mylab
+sparkrun model-cache inspect org/model --revision COMMIT --cluster mylab --checksum --json
+sparkrun model-cache repair org/model --revision COMMIT --cluster mylab --offline
+```
+
+| Option | Applies to | Meaning |
+| --- | --- | --- |
+| `--revision TEXT` | All manifest commands | Requested revision; immutable commit recommended |
+| `--file-selection auto\|all\|safetensors` | All manifest commands | File policy (default `auto`); match the preparation policy |
+| `--projector TEXT` | All manifest commands | GGUF projector selection from the same revision |
+| `--endpoint TEXT` | All manifest commands | Model origin; defaults to `HF_ENDPOINT` or Hugging Face |
+| `--cache-dir TEXT` | All manifest commands | HF home; controller-local for `resolve`, target hosts for the others |
+| `--checksum` | `inspect`, `import`, `repair` | Validate selected contents against authoritative hashes |
+| `--json` | `inspect`, `import`, `repair` | Print validation reports as JSON |
+| `--output PATH` | `resolve` | Required destination for the portable manifest |
+| `--manifest FILE` | `import` | Reviewed manifest to import without origin access; preferred for reproducible imports |
+| `--offline` | `import` | Require `--manifest` and prohibit origin resolution |
+| `--yes` / `-y` | `import` | Accept origin-resolved metadata without prompting; required without a terminal or with `--json` when no manifest is supplied |
+
+### Import a manifest or resolve one online
+
+Prefer a reviewed `--manifest` for reproducible imports. A supplied manifest is
+validated and imported without contacting the model origin, even without
+`--offline`. An invalid manifest fails instead of triggering an online fallback.
+
+When you do not have a manifest, `import` can resolve one on the controller:
+
+```bash
+# Resolve metadata, review its immutable identity, and confirm before saving.
+sparkrun model-cache import org/model --revision COMMIT --cluster mylab
+
+# Explicit consent for an unattended import; JSON reports go to stdout.
+sparkrun model-cache import org/model --revision COMMIT --cluster mylab --yes --json
+
+# Offline import always requires a supplied manifest.
+sparkrun model-cache import org/model --revision COMMIT --cluster mylab --manifest manifest.json --offline
+```
+
+Online resolution happens once for all targets and may download a small weight
+index, never model weights. Before saving, the interactive command displays the
+origin, repository, immutable commit, file count, and targets, then asks for
+confirmation. Declining leaves target manifests unchanged. This identity summary
+goes to stderr, keeping stdout machine-readable with `--json`.
+
+Specify `--revision` when checking an existing download. Without it, the origin's
+current default revision may differ from your cached one. `--offline` requires
+`--manifest` even with `--yes`. Origin or authentication failures stop the import;
+local file listings never substitute for expected inventory.
+
+Import saves a valid manifest even when files are missing or invalid, reports
+incompleteness, and exits nonzero. Use `repair` to acquire missing files. Import
+does not enroll snapshots in retention or refresh usage; use `adopt` for that.
+Confirmation accepts the inventory's source and revision, not model-code execution.
+
+### Repair options
 
 | Option | Meaning |
 | --- | --- |
-| `--revision TEXT` | Requested revision; immutable commit recommended |
-| `--file-selection auto\|all\|safetensors` | File policy (default `auto`); use the same policy for preparation/inspection/import |
-| `--projector TEXT` | GGUF projector selection from the same revision |
-| `--endpoint TEXT` | Model origin endpoint |
-| `--cache-dir TEXT` | HF home on targets, not its `hub/` subdirectory |
-| `--host TEXT` | Repeatable target; defaults to localhost; uses configured SSH credentials |
-| `--checksum` | Validate selected contents against authoritative hashes |
-
-## Repair options
-
-| Option | Meaning |
-| --- | --- |
-| `--offline` | Cluster copies only; no origin requests or tool installation |
-| `--dry-run` | No metadata requests, probes, or cache writes |
+| `--offline` | Reuse cached files and cluster copies only; no origin requests or tool installation |
+| `--dry-run` | Skip model preparation and cache writes |
 | `--local-cache-dir TEXT` | Controller-side HF cache home |
 | `--transfer-mode local\|push\|delegated\|pull` | Override the repair transfer policy |
 
-A repair dry run performs no probes. A prune preview reads cache inventory and
-checks publication locks to plan removals; it does not change cache files.
+Known damage never falls back to legacy presence checks. Repair affected snapshot
+entries and broken HF links; permission failures need an access/ownership fix.
+A repair dry run skips model inspection and acquisition. CLI target resolution can
+still probe the head's HF home when no cache directory is configured. Retention
+previews read cache inventory and check locks without changing cache files.
+
+## Adopt existing downloads
+
+Enroll snapshots downloaded by `hf download`, notebooks, or older launchers so
+sparkrun can track and prune them:
+
+```bash
+sparkrun model-cache list --cluster mylab --all
+sparkrun model-cache adopt org/model --cluster mylab
+sparkrun model-cache adopt org/model --cluster mylab --apply --pin
+```
+
+Adoption writes usage records only. It does not download, move, or delete files,
+and does not create an authoritative launch manifest. Online validation checks
+each present file against the origin's inventory and size; partial snapshots are
+allowed, while unknown or wrong-size files are refused.
+
+| Option | Meaning |
+| --- | --- |
+| `--all` | Adopt all models instead of naming one; cannot combine with `MODEL` or `--revision` |
+| `--revision TEXT` | Select a model's commit or ref, such as `main` |
+| `--dry-run` / `--apply` | Preview by default; explicitly write usage records |
+| `--offline` | Require every entry to link into the HF blob store; plain files alone cannot prove origin |
+| `--last-used now\|mtime` | Start retention age now (default), or use the newest snapshot entry's modification time |
+| `--pin` | Protect newly adopted revisions from pruning |
+| `--endpoint TEXT` | Origin for the named model; defaults to `HF_ENDPOINT` or Hugging Face |
+| `--json` | Print per-cache reports as JSON |
+
+`--last-used mtime` can make a revision immediately eligible for cleanup. Other
+tools do not refresh sparkrun's usage clock: pin revisions they still use when
+automatic pruning is enabled.
 
 ## Retention options
 
 ```bash
-sparkrun model-cache list --host node1 --host node2 --cache-dir /models/hf
-sparkrun model-cache prune --host node1 --cache-dir /models/hf --min-age-days 7
-sparkrun model-cache prune --host node1 --cache-dir /models/hf --min-free-bytes 107374182400 --apply
-sparkrun model-cache pin org/model --revision FULL_COMMIT --host node1 --cache-dir /models/hf
-sparkrun model-cache pin org/model --revision FULL_COMMIT --host node1 --cache-dir /models/hf --remove
+sparkrun model-cache list --cluster mylab --json
+sparkrun model-cache prune --cluster mylab --min-age-days 7
+sparkrun model-cache prune --cluster mylab --min-free-bytes 107374182400 --apply
+sparkrun model-cache pin org/model --revision FULL_COMMIT --cluster mylab
+sparkrun model-cache pin org/model --revision FULL_COMMIT --cluster mylab --remove
 ```
 
 | Option | Command | Meaning |
 | --- | --- | --- |
+| `--all` | `list` | Include untracked snapshots in tables; JSON always includes them |
 | `--dry-run` / `--apply` | `prune` | Preview by default; explicitly apply removals |
 | `--min-age-days NUMBER` | `prune` | Nonnegative minimum age since use/release; default 7 days |
-| `--max-bytes INTEGER` | `prune` | Nonnegative private tracked-snapshot budget, excluding shared HF blobs and untracked data |
+| `--max-bytes INTEGER` | `prune` | Nonnegative private tracked-snapshot budget, including blobs only that snapshot uses |
 | `--min-free-bytes INTEGER` | `prune` | Nonnegative free-space target for the cache filesystem |
 | `--revision FULL_COMMIT` | `pin`, `reconcile` | Required full immutable commit ID |
 | `--remove` | `pin` | Remove the retention pin |
+| `--endpoint TEXT` | `pin`, `reconcile` | Origin matching the tracked revision |
 | `--claim ID` | `reconcile` | Exact outstanding claim ID from `list` |
 | `--confirm-inactive` | `reconcile` | Confirm all workloads and launches covered by the claim have stopped |
+| `--json` | All retention commands | Print per-cache reports as JSON |
 
 Without a byte target, `prune` selects all eligible revisions older than the
 minimum age. With both targets, it works toward both. Budgets apply per cache,
-and a target that cannot be met gives a nonzero CLI exit. Reports include
-`entries`, `planned_bytes`, `reclaimed_bytes`, `free_bytes`, and `target_met`;
-prune also reports `free_bytes_after`. Check each entry's `reason` and `action`.
-Logical model size and reclaimable disk allocation are different measurements.
+and an unmet target gives a nonzero CLI exit. Pins, workload claims, unknown
+content, invalid metadata, active downloads, and busy publication locks protect
+revisions. Pruning removes blobs only the selected snapshot uses; blobs still
+referenced elsewhere are retained.
 
-Pins, workload claims, unknown content, invalid metadata, and busy caches are
-protected. Shared HF blobs are never deleted. Snapshot copies on a shared mount
-must not be counted once per reporting host. Preparation/repair enrolls a revision
-in tracking; read-only inspection and manifest import do not.
+Reports include `entries`, `planned_bytes`, `reclaimed_bytes`, `free_bytes`,
+`free_bytes_after`, and `target_met`. Check each entry's `reason_code`, `reason`,
+and `action`. Logical model size and reclaimable disk allocation differ.
+
+## Explicitly delete a model or revision
+
+Use `delete` when you intend to remove a named model regardless of its retention
+age, pin, or tracked status. Omit `--revision` to remove all of its cached revisions.
+
+```bash
+sparkrun model-cache delete org/model --cluster mylab --revision COMMIT --dry-run
+sparkrun model-cache delete org/model --cluster mylab --revision COMMIT
+```
+
+The second command previews the removal and asks for confirmation. For scripts,
+`--yes` / `-y` skips the prompt; it is required when applying without a terminal
+or with `--json`. `--dry-run` always stops at the preview.
+
+An outstanding workload claim blocks deletion unless you pass `--force`. Force
+does not bypass an active HF download or busy publication lock. If any target
+refuses the preflight, no target is deleted. A later execution failure can still
+leave partial progress; deletion is not a transaction across caches.
+
+Deletion removes snapshots, their refs and usage records, and blobs no remaining
+snapshot uses. Saved manifests stay available for `model-cache repair`.
+References from outside the HF cache are not discoverable. See
+[explicit deletion](/advanced/cache-management/#delete-a-model-or-revision).
 
 ## Release an interrupted workload claim
 
@@ -117,7 +224,7 @@ launch before confirming:
 
 ```bash
 sparkrun model-cache reconcile org/model --revision FULL_COMMIT \
-  --claim CLAIM_ID --host node1 --cache-dir /models/hf --confirm-inactive
+  --claim CLAIM_ID --cluster mylab --confirm-inactive
 ```
 
 Reconciliation removes only the claim and restarts its retention age. It trusts

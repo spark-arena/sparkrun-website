@@ -426,8 +426,8 @@ def register(v):
             if plugin_state(plugin, sctx.config, channel=args.channel, env={}).enabled != defaults[channel_index]:
                 errors.append(f'{plugin} loading default mismatch for {args.channel}')
         cache_command = cli.get_command(click.Context(cli), 'model-cache')
-        if cache_command.hidden != (args.advanced == '0'):
-            errors.append('model-cache advanced help visibility mismatch')
+        if cache_command.hidden:
+            errors.append('model-cache must appear in normal help on every channel')
         # Ensure the parser actually rejects unsupported flags (resilient parsing
         # would silently swallow these errors and give misleading verification).
         try:

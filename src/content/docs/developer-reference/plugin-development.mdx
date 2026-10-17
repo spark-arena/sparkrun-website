@@ -573,7 +573,7 @@ Listing and lookup share the enumerator, and listing calls `load` offline. An
 unavailable format is inert, so foreign manifests are never silently treated as
 native recipes. Format selection is honored for trusted or plugin-declared
 registries. Keep enumerated paths inside the catalog root, including symlinks.
-The bundled [lil adapter](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/plugins/lil/__init__.py)
+The bundled [lil adapter](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/plugins/lil/__init__.py)
 shows format registration and registry declaration together.
 
 ## Execution implementations
@@ -591,10 +591,10 @@ when implementing those families rather than assuming their module paths are sta
 | --- | --- | --- |
 | `sparkrun.plugins.RuntimePlugin` | Engine commands, readiness, runtime capabilities, logs, and solo/cluster launch behavior | [Runtime Implementations](/developer-reference/runtime-implementations/) |
 | `sparkrun.plugins.BuilderPlugin` | Image transformation or host environment preparation | [Builders](/developer-reference/builders/#builder-plugin-interface) |
-| `sparkrun.plugins.Executor` | Substrate launch scripts, status, logs, teardown, mounts, and runtime-cache policy | [Executor contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/orchestration/executors/_base.py) |
-| `sparkrun.core.scheduler.Scheduler` | `schedule(SchedulingRequest) -> SchedulingResult`; rank/device placement and feasibility | [Scheduler contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/core/scheduler.py) |
-| `sparkrun.transports.base.Transport` | Cluster preparation and `open_host_session()` for execution, streaming, and file transfer | [Transport contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/transports/base.py) |
-| `sparkrun.orchestration.telemetry._base.TelemetryProvider` | `open()` sessions whose `snapshot()` returns host telemetry and whose `close()` releases resources | [Telemetry contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/orchestration/telemetry/_base.py) |
+| `sparkrun.plugins.Executor` | Substrate launch scripts, status, logs, teardown, mounts, and runtime-cache policy | [Executor contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/orchestration/executors/_base.py) |
+| `sparkrun.core.scheduler.Scheduler` | `schedule(SchedulingRequest) -> SchedulingResult`; rank/device placement and feasibility | [Scheduler contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/core/scheduler.py) |
+| `sparkrun.transports.base.Transport` | Cluster preparation and `open_host_session()` for execution, streaming, and file transfer | [Transport contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/transports/base.py) |
+| `sparkrun.orchestration.telemetry._base.TelemetryProvider` | `open()` sessions whose `snapshot()` returns host telemetry and whose `close()` releases resources | [Telemetry contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/orchestration/telemetry/_base.py) |
 | `sparkrun.plugins.BenchmarkingPlugin` | Measurement commands, task schedules, and result parsing | [Benchmark extensions](#benchmark-extensions) |
 
 Schedulers and transports must set nonempty `scheduler_name` and `transport_name`
@@ -707,13 +707,13 @@ Add read-only target facts with
 The script emits namespaced `KEY=VALUE` facts; `enrich(parsed, hardware)` returns
 `HostHardware`. Keep device-specific probing and qualification in the plugin.
 See [Multiplatform](/advanced/multiplatform/) and the
-[hardware extension contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/MULTIPLATFORM.md#plugin-owned-hardware-probes).
+[hardware extension contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/MULTIPLATFORM.md#plugin-owned-hardware-probes).
 
 For a new model architecture's KV-cache accounting, implement `KVCacheStrategy`
 from `sparkrun.plugins` and call `register_kv_strategy(instance)` in your
 registration hook. Its architecture fields, detection, and sizing rules feed
 shared model inspection and memory planning. The
-[KV strategy base](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/models/kv/_base.py)
+[KV strategy base](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/models/kv/_base.py)
 defines the required hooks and result types. Strategies are tried in priority order;
 registering a changed definition under an existing name raises `PluginConflictError`,
 so use a distinct name.
@@ -776,7 +776,7 @@ change details. Use `action_context.run()` for credential-aware execution and ke
 credentials out of saved records. Undo returns `ok` only when the change is gone
 or already absent; other results retain the record for retry. The runner handles
 previews, sequencing, reprobes, and per-host recording. See the
-[shared setup contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/SETUP_STEPS.md)
+[shared setup contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/SETUP_STEPS.md)
 for dependency and undo behavior.
 
 ## Benchmark extensions
@@ -791,7 +791,7 @@ the requested measurements.
 Credentials are injected into the detached command arguments at execution time.
 Do not require them in `build_task_list`, log them, or persist them in artifacts.
 Processing-only recovery can rebuild accepted results without launching inference.
-See the [framework base](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/benchmarking/base.py)
+See the [framework base](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/benchmarking/base.py)
 and [Benchmark API](/developer-reference/benchmark-api/).
 
 For reporting or publication, register `BenchmarkIntegration` as in the
@@ -818,7 +818,7 @@ YAML/provenance: capture needed provenance during binding/checkpointing. Saved
 integrations resume when available, and their data survives disabling/uninstalling
 the plugin. Finalization errors retain measurements; callers can inspect
 `BenchmarkFinalizationFailed.stage` and `errors`. The bundled
-[Arena registration](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/plugins/sparkarena/__init__.py)
+[Arena registration](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/plugins/sparkarena/__init__.py)
 is a complete integration example.
 
 ## Distribution and gateway providers
@@ -838,7 +838,7 @@ preview policy, cancellation/timeouts where supplied, and request feedback. A
 borrowed session remains caller-owned. Image results must account for requested
 hosts; `runtime_images` can identify verified immutable Docker IDs when the
 imported image has a different local reference. See the bundled
-[OCI Relay adapter](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/src/sparkrun/plugins/oci_relay/__init__.py)
+[OCI Relay adapter](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/src/sparkrun/plugins/oci_relay/__init__.py)
 for provider registration.
 
 For models, core resolves an immutable `ModelArtifactManifest`, observes targets,
@@ -855,7 +855,7 @@ explicit selection. Explicit selections never silently fall back. In auto mode,
 unsupported-operation fallback must be opted into and occur before mutation;
 partial failures stop the operation. An image provider does not automatically
 provide model transfer. See [Model Cache Management](/advanced/cache-management/) and the
-[model provider example](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/PLUGINS.md#model-distribution-providers).
+[model provider example](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/PLUGINS.md#model-distribution-providers).
 
 ### Proxy engines
 
@@ -866,7 +866,7 @@ Implement the typed model-query contract using `ProxyModel` from
 `sparkrun.plugins`. Console access, console credentials, and admin-token
 management are separate optional protocols. Dictionary-returning model queries
 need adaptation in the provider. See the
-[gateway plugin contract](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/PROXY.md#gateway-plugin-contract).
+[gateway plugin contract](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/PROXY.md#gateway-plugin-contract).
 
 Provider-specific settings belong under `gateways.<gateway_name>` in
 `proxy.yaml`. Read them with `sctx.proxy_config.gateway_settings(gateway_name)`;
@@ -1009,5 +1009,5 @@ Test the plugin through its real module entry point with isolated config/cache:
 - Run pure runtime/framework hooks separately from qualified hardware tests;
   validate actual per-host outcomes before claiming execution support.
 
-The pinned [upstream plugin guide](https://github.com/spark-arena/sparkrun/blob/0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c/docs/PLUGINS.md)
+The pinned [upstream plugin guide](https://github.com/spark-arena/sparkrun/blob/974a3ded087340931a9d548ec93fba012b537c06/docs/PLUGINS.md)
 provides additional compatibility and lifecycle detail.

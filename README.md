@@ -68,7 +68,7 @@ Copyright 2026 Scitrera LLC.
 
 The website is prepared for the 0.4.0 release. Its verification reference is pinned
 in `scripts/docs-contracts.json` to
-`0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c`. Update the verification pin and source
+`974a3ded087340931a9d548ec93fba012b537c06`. Update the verification pin and source
 links at the release cut. Stable availability and
 portable-daemon platform checks are release gates, not inferred from version text.
 The reference includes domain-based daemon operations, plugin namespaces, shared
@@ -76,7 +76,12 @@ workload management, gateway discovery, model-cache usage/retention and optional
 LRU cleanup, plugin loading controls and lifecycle plans, shared diagnostic capture
 and plugin reporters, reusable Docker/native Kubernetes log readers with atomic
 file export, interactive monitor logs, namespaced gateway settings and balancing,
-dotted recipe overrides, and hybrid attention/recurrent memory estimates.
+dotted recipe overrides, and hybrid attention/recurrent memory estimates. Model
+cache commands now cover adoption, explicit deletion, cluster targeting and shared
+locations; preparation reuses unchanged cached weights across revisions. Monitor
+host details show sensor sparklines backed by configurable Python history and
+daemon backfill. Manifest imports support explicit origin consent, daemon deletion
+accepts a confirmed revision set, and model variants retain inherited metadata.
 `gateway.sparkroute` remains off by default on every channel. The Daemon API reference covers core and bundled integrations;
 its operation inventory excludes external plugins.
 
@@ -85,7 +90,7 @@ cluster (Python 3.12+):
 
 ```sh
 python3.12 -m venv .venv-docs
-.venv-docs/bin/python -m pip install 'sparkrun @ git+https://github.com/spark-arena/sparkrun.git@0f400d2b01d2c84c9b1ddb1d18df1ab1e838342c'
+.venv-docs/bin/python -m pip install 'sparkrun @ git+https://github.com/spark-arena/sparkrun.git@974a3ded087340931a9d548ec93fba012b537c06'
 .venv-docs/bin/python scripts/check-docs-contracts.py
 npm run check
 npm run build
@@ -139,6 +144,10 @@ The page-by-page 0.4.0 review and local verification record is in
 
 The expandable operation inventory on **Daemon API** is generated from core's
 `docs/DAEMON_API.md` and the literal `DESCRIPTIONS` map in `daemon/ops.py`.
+The model-cache section is rebuilt from the literal `ModelCacheBinding`
+declarations in `daemon/model_cache_ops.py` and `daemon/request_fields.py`, since
+upstream Markdown can lag registrations. These declarations use job execution
+and the default `auto` reservation; review those assumptions when upgrading.
 Reviewed summaries in `scripts/daemon-operation-descriptions.json` cover operations
 whose upstream descriptions are generic. The tool parses source without importing
 Sparkrun or executing handlers, and rejects missing or stale descriptions.

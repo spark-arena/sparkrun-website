@@ -26,6 +26,11 @@ model paths, node ranks, and runtime caches. Authors can declare
 `min_sparkrun_version` to catch incompatible core versions before preparation.
 See [Recipe Format](/recipes/format/#recipe-inheritance).
 
+Model variants retain inherited `metadata`, including declared weight and KV-cache
+dtypes. Review model-specific estimates when changing `model`; override fields,
+remove individual values with `null`, or clear the block with `metadata: null`
+to use automatic detection.
+
 Use `-o key.field=value` to adjust one field of a mapping-valued default while
 preserving its other fields, including nested settings such as
 `speculative_config.draft_load_config.load_format`. See
@@ -114,10 +119,36 @@ transport errors stay separate from workload output. See
 [Diagnostics](/getting-started/diagnostics/), [Diagnostics API](/developer-reference/diagnostics-api/),
 and [Log Streaming API](/developer-reference/logging-api/).
 
-The [cluster monitor](/cli/cluster-commands/#interactive-workload-logs) now opens
-workload logs with Enter or a mouse click. Its viewer supports runtime colorization,
-regex search and highlighting, container/node/cluster scopes, older history, and
-file exports.
+## Improved cluster monitor TUI
+
+The cluster monitor now combines live host metrics, workload occupancy, sensor
+history, and interactive logs in one terminal interface:
+
+```bash
+sparkrun cluster monitor --cluster mylab
+```
+
+<figure>
+  <a href="/sparkrun-cluster-monitor-0.4.0.png" aria-label="View the cluster monitor screenshot at full size">
+    <img src="/sparkrun-cluster-monitor-0.4.0.png" alt="Cluster monitor showing six hosts, sensor sparklines for the selected host, and colorized workload logs." width="1920" height="1043" loading="lazy" decoding="async" />
+  </a>
+  <figcaption>Host metrics, sensor history, and workload logs. Select the image for full size. Screenshot from <a href="https://github.com/spark-arena/sparkrun/pull/322">PR #322</a>.</figcaption>
+</figure>
+
+- **Sensor sparklines in host details** show CPU/GPU utilization, temperatures,
+  GPU power and clock, RAM, and network send/receive rates alongside hardware identity.
+- **Configurable per-host history** retains 120 samples by default, about four
+  minutes at the two-second sampling interval. Set `monitor.history_points` to
+  change the window; collection continues as you switch hosts or view logs.
+  Stalled streams do not fill the history with repeated stale samples.
+- **Interactive workload logs** open with Enter or a mouse click, with runtime
+  colors, regex search and highlighting, container/node/cluster scopes, older
+  history, and file exports.
+
+See [cluster monitor controls](/cli/cluster-commands/#monitor-cluster).
+Applications can read the same history through the
+[Python API](/developer-reference/python-api/#live-monitoring-and-telemetry-history),
+and daemon subscribers receive recent history before live frames.
 
 ## Hardware-aware setup and SSH identity checks
 
@@ -189,10 +220,27 @@ Model manifests record expected files at an immutable revision. New cache comman
 inspect inventory, resolve metadata, import manifests, and repair damaged or
 missing files. Metadata and checksum validation are available alongside the legacy
 default. Cache-local usage records now track model preparation and workload use.
-You can list usage, pin revisions, and preview LRU cleanup before applying it.
-Optional automatic cleanup is off by default and preserves pins, workload claims,
-and unknown content. Parallel model copies have configurable per-host and total
-stream limits. Runtime compilation caches have separate reuse and cleanup controls.
+The `model-cache` group is visible in normal help and supports named/default
+clusters, readable tables, and `--json` reports.
+
+- **Adopt existing downloads** from Hugging Face tools or notebooks into usage
+  tracking without downloading them again. Preview adoption, then apply it;
+  optionally pin revisions that other applications still use.
+- **Import expected inventory directly from the origin** when you do not have
+  a manifest file. Review the resolved commit before saving; supplied manifests
+  remain the reproducible, offline option. Import validates files without
+  downloading weights or enrolling them in retention.
+- **Choose retention or explicit deletion.** List usage, pin revisions, preview
+  LRU cleanup, or delete a specific model/revision. Cleanup can reclaim blobs
+  used only by the removed snapshot while preserving blobs referenced elsewhere.
+- **Handle shared caches once.** Inventory and retention group hosts sharing
+  a recognized cache location, avoiding repeated actions and duplicate byte counts.
+- **Reuse unchanged weights across revisions.** Preparation can link existing
+  HF blobs and matching files from other prepared revisions before transferring
+  missing content. Parallel copies retain configurable per-host and total limits.
+
+Optional automatic cleanup remains off by default and preserves pins, workload
+claims, and unknown content. Runtime compilation caches have separate reuse and cleanup controls.
 See [Model Cache Management](/advanced/cache-management/).
 
 Tool benchmarks now show scenario verdicts and progress with tool-eval-bench
